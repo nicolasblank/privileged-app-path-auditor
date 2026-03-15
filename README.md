@@ -158,8 +158,8 @@ Every CSV that reports on a specific app or user includes an `EntraPortalUrl` co
 | `UnknownOwnerApps.csv` | `EntraPortalUrl` | Enterprise application |
 | `PermissionAudit.csv` | `EntraPortalUrl` | Enterprise application with dangerous permissions |
 | `RoleAudit.csv` | `EntraPortalUrl` | User with directory role assignment |
-| `AttackPaths.csv` | `AppEntraUrl`, `UserEntraUrl` | The privileged app **and** the non-admin user who owns it |
-| `ShadowAdmins.csv` | `SPEntraUrl`, `UserEntraUrl` | The role-bearing service principal **and** its owner |
+| `AttackPaths.csv` | `AppEntraUrl`, `UserEntraUrl` | The privileged app and the non-admin user who owns it |
+| `ShadowAdmins.csv` | `SPEntraUrl`, `UserEntraUrl` | The role-bearing service principal and its owner |
 | `StalePrivilege.csv` | `EntraPortalUrl` | Enterprise application with stale privilege |
 | `CredentialHygiene.csv` | `EntraPortalUrl` | Enterprise application with credential issues |
 
@@ -210,7 +210,7 @@ Every attack path has three components:
 
 | Component | CSV Column | What It Means |
 |---|---|---|
-| **The user** | `UserUPN`, `UserDisplayName` | A regular user with no privileged Entra ID roles. They are an **owner** of the app registration, which means they can modify its credentials. |
+| **The user** | `UserUPN`, `UserDisplayName` | A regular user with no privileged Entra ID roles. They are an owner of the app registration, which means they can modify its credentials. |
 | **The app** | `AppName`, `AppId` | An app registration whose service principal has been granted a dangerous application permission (e.g. `RoleManagement.ReadWrite.Directory`). |
 | **The escalation** | `Permission`, `Action`, `Result` | What the user can do: add a secret, authenticate as the app, and exploit the permission to reach Global Admin equivalence. |
 
