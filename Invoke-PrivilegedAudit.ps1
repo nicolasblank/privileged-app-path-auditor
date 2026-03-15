@@ -36,7 +36,7 @@
     .\Invoke-PrivilegedAudit.ps1 -Mode StalePrivilege -InactiveDays 60
 
 .NOTES
-    Version: 0.3.0
+    Version: 0.4.0
 
     This project uses the Microsoft first-party app name database from
     merill/microsoft-info (https://github.com/merill/microsoft-info) — MIT licensed.
@@ -58,7 +58,7 @@ param(
     [string]$ConfigPath = (Join-Path $PSScriptRoot 'config')
 )
 
-$script:Version = '0.3.0'
+$script:Version = '0.4.0'
 
 # Note: StrictMode is intentionally not set. The Microsoft Graph SDK returns\n# hashtables/OrderedDictionaries whose properties are not compatible with\n# StrictMode Version 2+ (.Count, property existence checks fail).
 $ErrorActionPreference = 'Stop'
