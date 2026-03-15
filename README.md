@@ -84,6 +84,8 @@ All read-only. The tool never modifies your tenant.
 | `CredentialHygiene` | Audits credential type/count for high-privilege apps | ~2 min |
 | `Full` | Runs all modes sequentially | ~9 min |
 
+> **Note:** Typical runtimes were measured against a real Entra ID tenant with ~1,300 service principals. Your results will vary depending on tenant size and network latency.
+
 ### Getting Started
 
 ```powershell
@@ -119,6 +121,66 @@ One CSV per mode is created in the export directory:
 `Summary.csv` contains the service principal classification breakdown (total, Microsoft first-party, home tenant, third-party, unknown owner, and how many were scanned). It is written by any mode that queries service principals.
 
 `FullAuditSummary.csv` is only produced by `Full` mode. It contains one row per mode with the finding count, the overall risk level and score, and the top remediation actions — useful for dashboards, trend tracking, or forwarding to a SIEM.
+
+### Entra Admin Center Links
+
+Every CSV that reports on a specific app or user includes an `EntraPortalUrl` column (or `AppEntraUrl` / `UserEntraUrl` where both entities appear). These are direct deep-links into the Microsoft Entra admin center — open them in a browser to jump straight to the entity's management blade without searching.
+
+#### URL Patterns
+
+| Entity | URL format | Opens |
+|---|---|---|
+| Service Principal / App | `https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/{id}/appId/{appId}` | Enterprise app Overview blade |
+| User | `https://entra.microsoft.com/#view/Microsoft_AAD_IAM/UserDetailsMenuBlade/~/Profile/userId/{id}` | User profile blade |
+
+#### Which CSVs Include Links
+
+| CSV | Column(s) | Entity linked |
+|---|---|---|
+| `UnknownOwnerApps.csv` | `EntraPortalUrl` | Enterprise application |
+| `PermissionAudit.csv` | `EntraPortalUrl` | Enterprise application with dangerous permissions |
+| `RoleAudit.csv` | `EntraPortalUrl` | User with directory role assignment |
+| `AttackPaths.csv` | `AppEntraUrl`, `UserEntraUrl` | The privileged app **and** the non-admin user who owns it |
+| `ShadowAdmins.csv` | `SPEntraUrl`, `UserEntraUrl` | The role-bearing service principal **and** its owner |
+| `StalePrivilege.csv` | `EntraPortalUrl` | Enterprise application with stale privilege |
+| `CredentialHygiene.csv` | `EntraPortalUrl` | Enterprise application with credential issues |
+
+`ConsentRisk.csv`, `Summary.csv`, and `FullAuditSummary.csv` report tenant-level settings or aggregate counts and do not link to individual entities.
+
+#### How to Use the Links
+
+1. **Open the CSV** in Excel, Google Sheets, or any viewer that renders clickable hyperlinks
+2. **Click an `EntraPortalUrl`** — it opens the entity directly in the Entra admin center (you must be signed in with an admin account)
+3. **Investigate** using the blades relevant to the finding type:
+
+| Finding type | What to check in Entra |
+|---|---|
+| Dangerous permission | **Permissions** tab — review and remove unnecessary API permissions |
+| Privileged role holder | **Assigned roles** tab — verify the role is intended; consider PIM eligible assignment instead of permanent |
+| Attack path (app) | **Owners** tab — remove non-admin owners from privileged apps; **Permissions** tab — reduce scope |
+| Attack path (user) | **Owned applications** — review all apps the user can control |
+| Shadow admin | **Owned applications** — the user can reset credentials on a role-bearing SP; remove ownership or the SP role |
+| Stale privilege | **Sign-in logs** tab — confirm inactivity; **Properties** — disable the app if unused |
+| Credential hygiene | **Certificates & secrets** — rotate expired credentials or remove unused ones |
+| Unknown owner app | **Overview** — check publisher and sign-in activity; **Owners** — assign an owner or flag for removal |
+
+#### Tips
+
+- **Bookmark the export** — Entra URLs are deterministic and stable. They will continue to work as long as the entity exists in your tenant.
+- **Bulk triage** — sort the CSV by `Risk` or `RiskLevel`, then work through the Entra links from critical to info.
+- **Delegate investigation** — share the CSV with a colleague who has Entra admin access. The links let them jump directly to each finding without needing to search.
+
+### Investigating Unknown Owner Apps
+
+When the audit reports unknown owner apps, each one is exported to `UnknownOwnerApps.csv` with a clickable `EntraPortalUrl` column. For each app:
+
+1. **Open the Entra portal link** — check the Overview blade for publisher, sign-in activity, and assigned users
+2. **Check Owners** — if no owners are listed, the app may be orphaned. Assign an owner or flag for removal
+3. **Check Permissions** — review the API permissions tab. Unknown-origin apps with `Directory.ReadWrite.All` or `RoleManagement.ReadWrite.Directory` are high priority
+4. **Check Sign-in logs** — if the app has never signed in and has no users assigned, consider disabling it
+5. **Decide**: keep (assign an owner), disable (`Update-MgServicePrincipal -AccountEnabled:$false`), or delete
+
+Unknown owner apps are **not** filtered from scanning — they are checked for dangerous permissions alongside home tenant and third-party apps.
 
 ### Adjusting Stale Threshold
 
@@ -464,66 +526,6 @@ Source: [Microsoft Entra built-in roles](https://learn.microsoft.com/entra/ident
 | **Home tenant** | Apps your organization registered in Entra ID |
 | **Third-party (cross-tenant)** | Apps from non-Microsoft external vendors (SaaS products you've consented to). These are typically the highest-risk category — they originate from another organization's tenant and have been granted permissions in yours. |
 | **Unknown owner** | No `appOwnerOrganizationId` and not in the Microsoft lookup. May be legacy apps, managed identities with incomplete metadata, or apps from deleted tenants. These are exported to `UnknownOwnerApps.csv` with direct Entra portal links for investigation. |
-
-### Entra Admin Center Links
-
-Every CSV that reports on a specific app or user includes an `EntraPortalUrl` column (or `AppEntraUrl` / `UserEntraUrl` where both entities appear). These are direct deep-links into the Microsoft Entra admin center — open them in a browser to jump straight to the entity's management blade without searching.
-
-#### URL Patterns
-
-| Entity | URL format | Opens |
-|---|---|---|
-| Service Principal / App | `https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/{id}/appId/{appId}` | Enterprise app Overview blade |
-| User | `https://entra.microsoft.com/#view/Microsoft_AAD_IAM/UserDetailsMenuBlade/~/Profile/userId/{id}` | User profile blade |
-
-#### Which CSVs Include Links
-
-| CSV | Column(s) | Entity linked |
-|---|---|---|
-| `UnknownOwnerApps.csv` | `EntraPortalUrl` | Enterprise application |
-| `PermissionAudit.csv` | `EntraPortalUrl` | Enterprise application with dangerous permissions |
-| `RoleAudit.csv` | `EntraPortalUrl` | User with directory role assignment |
-| `AttackPaths.csv` | `AppEntraUrl`, `UserEntraUrl` | The privileged app **and** the non-admin user who owns it |
-| `ShadowAdmins.csv` | `SPEntraUrl`, `UserEntraUrl` | The role-bearing service principal **and** its owner |
-| `StalePrivilege.csv` | `EntraPortalUrl` | Enterprise application with stale privilege |
-| `CredentialHygiene.csv` | `EntraPortalUrl` | Enterprise application with credential issues |
-
-`ConsentRisk.csv`, `Summary.csv`, and `FullAuditSummary.csv` report tenant-level settings or aggregate counts and do not link to individual entities.
-
-#### How to Use the Links
-
-1. **Open the CSV** in Excel, Google Sheets, or any viewer that renders clickable hyperlinks
-2. **Click an `EntraPortalUrl`** — it opens the entity directly in the Entra admin center (you must be signed in with an admin account)
-3. **Investigate** using the blades relevant to the finding type:
-
-| Finding type | What to check in Entra |
-|---|---|
-| Dangerous permission | **Permissions** tab — review and remove unnecessary API permissions |
-| Privileged role holder | **Assigned roles** tab — verify the role is intended; consider PIM eligible assignment instead of permanent |
-| Attack path (app) | **Owners** tab — remove non-admin owners from privileged apps; **Permissions** tab — reduce scope |
-| Attack path (user) | **Owned applications** — review all apps the user can control |
-| Shadow admin | **Owned applications** — the user can reset credentials on a role-bearing SP; remove ownership or the SP role |
-| Stale privilege | **Sign-in logs** tab — confirm inactivity; **Properties** — disable the app if unused |
-| Credential hygiene | **Certificates & secrets** — rotate expired credentials or remove unused ones |
-| Unknown owner app | **Overview** — check publisher and sign-in activity; **Owners** — assign an owner or flag for removal |
-
-#### Tips
-
-- **Bookmark the export** — Entra URLs are deterministic and stable. They will continue to work as long as the entity exists in your tenant.
-- **Bulk triage** — sort the CSV by `Risk` or `RiskLevel`, then work through the Entra links from critical to info.
-- **Delegate investigation** — share the CSV with a colleague who has Entra admin access. The links let them jump directly to each finding without needing to search.
-
-### Investigating Unknown Owner Apps
-
-When the audit reports unknown owner apps, each one is exported to `UnknownOwnerApps.csv` with a clickable `EntraPortalUrl` column. For each app:
-
-1. **Open the Entra portal link** — check the Overview blade for publisher, sign-in activity, and assigned users
-2. **Check Owners** — if no owners are listed, the app may be orphaned. Assign an owner or flag for removal
-3. **Check Permissions** — review the API permissions tab. Unknown-origin apps with `Directory.ReadWrite.All` or `RoleManagement.ReadWrite.Directory` are high priority
-4. **Check Sign-in logs** — if the app has never signed in and has no users assigned, consider disabling it
-5. **Decide**: keep (assign an owner), disable (`Update-MgServicePrincipal -AccountEnabled:$false`), or delete
-
-Unknown owner apps are **not** filtered from scanning — they are checked for dangerous permissions alongside home tenant and third-party apps.
 
 4. Cross-references the data to map relationships (user → owns app → app has permission → escalation path)
 5. Outputs findings to the console with actionable remediation guidance
