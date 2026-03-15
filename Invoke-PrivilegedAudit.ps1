@@ -36,7 +36,7 @@
     .\Invoke-PrivilegedAudit.ps1 -Mode StalePrivilege -InactiveDays 60
 
 .NOTES
-    Version: 0.4.0
+    Version: 0.5.0
 
     This project uses the Microsoft first-party app name database from
     merill/microsoft-info (https://github.com/merill/microsoft-info) — MIT licensed.
@@ -58,7 +58,8 @@ param(
     [string]$ConfigPath = (Join-Path $PSScriptRoot 'config')
 )
 
-$script:Version = '0.4.0'
+$script:Version = '0.5.0'
+$script:CachedDangerousApps = $null
 
 # Note: StrictMode is intentionally not set. The Microsoft Graph SDK returns\n# hashtables/OrderedDictionaries whose properties are not compatible with\n# StrictMode Version 2+ (.Count, property existence checks fail).
 $ErrorActionPreference = 'Stop'
@@ -132,6 +133,30 @@ $script:DefaultAttackPaths = @(
             'Remove the non-admin user as owner of the service principal'
             'Remove the privileged directory role from the service principal'
             'Use PIM for just-in-time role activation instead of permanent assignments'
+        )
+    }
+    @{
+        id          = 'ROLE_BASED_SP_CONTROL'
+        name        = 'Application Admin Controls Privileged Service Principals'
+        severity    = 'Critical'
+        description = 'A user with Application Administrator or Cloud Application Administrator can add secrets to any SP — including SPs with privileged directory roles.'
+        remediation = @(
+            'Use PIM with approval workflow for the Application Administrator role'
+            'Limit Application Administrator scope with Administrative Units'
+            'Monitor SP credential changes in Entra audit logs'
+            'Remove permanent Application Administrator assignments where possible'
+        )
+    }
+    @{
+        id          = 'UNOWNED_PRIVILEGED_APP'
+        name        = 'Unowned Application with Dangerous Permissions'
+        severity    = 'High'
+        description = 'An application has GA-equivalent permissions but no assigned owners — no accountability for credential rotation or access review.'
+        remediation = @(
+            'Assign a responsible owner to the application'
+            'Review if the application is still needed'
+            'Rotate or remove existing credentials'
+            'Enable app instance property lock to prevent SP-level credential injection'
         )
     }
 )
@@ -387,6 +412,12 @@ function Get-AllGraphPages {
 }
 
 function Get-ServicePrincipalsWithAppRoles {
+    # Cache results so the expensive Graph queries only run once in Full mode
+    if ($null -ne $script:CachedDangerousApps) {
+        Write-Host "  Using cached service principal data..." -ForegroundColor Gray
+        return $script:CachedDangerousApps
+    }
+
     Write-Host "  Querying service principals and app role assignments..." -ForegroundColor Gray
     $sps = Get-AllGraphPages -Uri 'https://graph.microsoft.com/v1.0/servicePrincipals?$select=id,appId,displayName,appOwnerOrganizationId,servicePrincipalType,accountEnabled&$top=999'
 
@@ -545,6 +576,7 @@ function Get-ServicePrincipalsWithAppRoles {
         }
     }
 
+    $script:CachedDangerousApps = $results
     return $results
 }
 
@@ -669,6 +701,75 @@ function Get-AppCredentials {
                     }
                 } catch { }
                 $results[$appId] = $creds
+            }
+        } catch {
+            continue
+        }
+    }
+    return $results
+}
+
+function Get-SPDirectCredentials {
+    param([string[]]$SPIds)
+    Write-Host "  Querying SP-level credentials (hidden from portal)..." -ForegroundColor Gray
+    $results = @{}
+    foreach ($spId in $SPIds) {
+        try {
+            $sp = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$spId`?`$select=id,passwordCredentials,keyCredentials"
+            $creds = @()
+            if ($sp.passwordCredentials) {
+                foreach ($pc in $sp.passwordCredentials) {
+                    $creds += [PSCustomObject]@{
+                        Type          = 'SP-Secret'
+                        KeyId         = $pc.keyId
+                        DisplayName   = $pc.displayName
+                        StartDateTime = $pc.startDateTime
+                        EndDateTime   = $pc.endDateTime
+                        Expired       = if ($pc.endDateTime) { [datetime]$pc.endDateTime -lt (Get-Date) } else { $false }
+                    }
+                }
+            }
+            if ($sp.keyCredentials) {
+                foreach ($kc in $sp.keyCredentials) {
+                    $creds += [PSCustomObject]@{
+                        Type          = 'SP-Certificate'
+                        KeyId         = $kc.keyId
+                        DisplayName   = $kc.displayName
+                        StartDateTime = $kc.startDateTime
+                        EndDateTime   = $kc.endDateTime
+                        Expired       = if ($kc.endDateTime) { [datetime]$kc.endDateTime -lt (Get-Date) } else { $false }
+                    }
+                }
+            }
+            $results[$spId] = $creds
+        } catch {
+            continue
+        }
+    }
+    return $results
+}
+
+function Get-AppInstanceLockStatus {
+    param([string[]]$AppIds)
+    Write-Host "  Querying app instance property lock status..." -ForegroundColor Gray
+    $results = @{}
+    foreach ($appId in $AppIds) {
+        try {
+            $apps = Get-AllGraphPages -Uri "https://graph.microsoft.com/v1.0/applications?`$filter=appId eq '$appId'&`$select=id,appId,servicePrincipalLockConfiguration"
+            $app = $apps | Select-Object -First 1
+            if ($app) {
+                $lockConfig = $app.servicePrincipalLockConfiguration
+                $isLocked = $false
+                if ($lockConfig -and $lockConfig.isEnabled) {
+                    $credLock = $lockConfig.credentialsWithUsageSign
+                    if ($credLock -and $credLock.state -eq 'LockedForEdit') {
+                        $isLocked = $true
+                    }
+                }
+                $results[$appId] = [PSCustomObject]@{
+                    IsEnabled          = [bool]($lockConfig -and $lockConfig.isEnabled)
+                    IsCredentialLocked = $isLocked
+                }
             }
         } catch {
             continue
@@ -836,24 +937,48 @@ function Invoke-RoleAudit {
 #region ── Mode: AttackPath ───────────────────────────────────────────────────
 
 function Invoke-AttackPathAnalysis {
-    Write-Banner "ATTACK PATH ANALYSIS -- User -> App Owner -> Privilege Escalation"
+    Write-Banner "ATTACK PATH ANALYSIS -- Privilege Escalation via Applications & Service Principals"
 
     $dangerousApps = Get-ServicePrincipalsWithAppRoles
-    if ($dangerousApps.Count -eq 0) {
-        Write-Host "✓ No dangerous apps found. No attack paths to analyze." -ForegroundColor Green
-        return @()
-    }
-
     $roleAssignments = Get-PrivilegedRoleAssignments
     $privilegedUserIds = @($roleAssignments | Where-Object { $_.PrincipalType -eq '#microsoft.graph.user' } | ForEach-Object { $_.PrincipalId }) | Select-Object -Unique
 
+    # SPs with privileged directory roles
+    $privilegedSPs = $roleAssignments | Where-Object { $_.PrincipalType -eq '#microsoft.graph.servicePrincipal' }
+
+    if ($dangerousApps.Count -eq 0 -and $privilegedSPs.Count -eq 0) {
+        Write-Host "✓ No dangerous apps or SPs with privileged roles found. No attack paths to analyze." -ForegroundColor Green
+        return @()
+    }
+
     # Get owners for dangerous apps
-    $appIds = $dangerousApps | ForEach-Object { $_.AppId } | Select-Object -Unique
-    $appOwners = Get-ApplicationOwners -AppIds $appIds
+    $appIds = @()
+    $appOwners = @{}
+    if ($dangerousApps.Count -gt 0) {
+        $appIds = @($dangerousApps | ForEach-Object { $_.AppId } | Select-Object -Unique)
+        $appOwners = Get-ApplicationOwners -AppIds $appIds
+    }
+
+    # Collect all relevant SP IDs for credential and lock queries
+    $allRelevantSPIds = @()
+    if ($dangerousApps.Count -gt 0) { $allRelevantSPIds += @($dangerousApps | ForEach-Object { $_.SPId } | Select-Object -Unique) }
+    if ($privilegedSPs.Count -gt 0) { $allRelevantSPIds += @($privilegedSPs | ForEach-Object { $_.PrincipalId } | Select-Object -Unique) }
+    $allRelevantSPIds = @($allRelevantSPIds | Select-Object -Unique)
+
+    # Get SP-level credentials and app instance lock status
+    $spDirectCreds = @{}
+    $appLockStatus = @{}
+    if ($allRelevantSPIds.Count -gt 0) {
+        $spDirectCreds = Get-SPDirectCredentials -SPIds $allRelevantSPIds
+    }
+    if ($appIds.Count -gt 0) {
+        $appLockStatus = Get-AppInstanceLockStatus -AppIds $appIds
+    }
 
     $paths = @()
     $pathNum = 0
 
+    # ── PATH TYPE 1: App Owner Escalation ──────────────────────────────────
     foreach ($appId in $appOwners.Keys) {
         $owners = $appOwners[$appId]
         $apps = $dangerousApps | Where-Object { $_.AppId -eq $appId }
@@ -861,10 +986,16 @@ function Invoke-AttackPathAnalysis {
             if ($owner.id -in $privilegedUserIds) { continue } # Already an admin — not an escalation
             foreach ($app in $apps) {
                 $pathNum++
+                $spCreds = $spDirectCreds[$app.SPId]
+                $spCredCount = if ($spCreds) { @($spCreds | Where-Object { -not $_.Expired }).Count } else { 0 }
+                $lock = $appLockStatus[$appId]
+                $lockEnabled = if ($lock) { $lock.IsCredentialLocked } else { $false }
+
                 $pathDef = $script:AttackPathDefs | Where-Object { $_.id -eq 'APP_OWNER_ESCALATION' } | Select-Object -First 1
                 $paths += [PSCustomObject]@{
                     PathNumber      = $pathNum
                     PathType        = 'App Owner Escalation'
+                    PathId          = 'APP_OWNER_ESCALATION'
                     Severity        = 'CRITICAL'
                     UserDisplayName = $owner.displayName
                     UserUPN         = $owner.userPrincipalName
@@ -875,6 +1006,8 @@ function Invoke-AttackPathAnalysis {
                     PermissionType  = $app.PermissionType
                     Action          = "Add secret → authenticate as app → exploit $($app.Permission)"
                     Result          = 'GLOBAL ADMIN EQUIVALENT ACCESS'
+                    SPDirectCreds   = $spCredCount
+                    AppInstanceLock = if ($lockEnabled) { 'Enabled' } else { 'Disabled' }
                     Remediation     = if ($pathDef) { $pathDef.remediation -join '; ' } else { 'Remove owner or reduce permissions' }
                     UserEntraUrl    = Get-EntraUserUrl -ObjectId $owner.id
                     AppEntraUrl     = Get-EntraAppUrl -ObjectId $app.SPId -AppId $app.AppId
@@ -883,28 +1016,170 @@ function Invoke-AttackPathAnalysis {
         }
     }
 
-    if ($paths.Count -eq 0) {
-        Write-Host "✓ No attack paths found. No non-admin users own apps with dangerous permissions." -ForegroundColor Green
+    # ── PATH TYPE 2: Role-Based SP Control ─────────────────────────────────
+    # Users with Application Administrator or Cloud Application Administrator
+    # can add secrets to ANY SP in the tenant — including SPs with GA-equivalent roles.
+    $spControlRoleTemplateIds = @(
+        '9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3'  # Application Administrator
+        '158c047a-c907-4556-b7ef-446551a6b5f7'  # Cloud Application Administrator
+    )
+    $globalAdminTemplateId = '62e90394-69f5-4237-9190-012177145e10'
+
+    $appAdminUsers = $roleAssignments | Where-Object {
+        $_.PrincipalType -eq '#microsoft.graph.user' -and
+        $_.RoleTemplateId -in $spControlRoleTemplateIds
+    }
+
+    if ($appAdminUsers.Count -gt 0 -and $privilegedSPs.Count -gt 0) {
+        $uniqueAdminUserIds = @($appAdminUsers | ForEach-Object { $_.PrincipalId } | Select-Object -Unique)
+
+        foreach ($userId in $uniqueAdminUserIds) {
+            # Skip if user is already Global Admin — not an escalation
+            $userRoles = $roleAssignments | Where-Object {
+                $_.PrincipalId -eq $userId -and $_.PrincipalType -eq '#microsoft.graph.user'
+            }
+            if ($userRoles | Where-Object { $_.RoleTemplateId -eq $globalAdminTemplateId }) { continue }
+
+            $userAdminRole = $appAdminUsers | Where-Object { $_.PrincipalId -eq $userId } | Select-Object -First 1
+
+            # Group privileged SPs — one path per SP (showing all its roles)
+            $uniqueSPs = $privilegedSPs | Group-Object PrincipalId
+            foreach ($spGroup in $uniqueSPs) {
+                $sp = $spGroup.Group | Select-Object -First 1
+                $spRoles = ($spGroup.Group | ForEach-Object { $_.RoleName }) -join ', '
+                $topRole = ($spGroup.Group | Sort-Object { switch ($_.RoleTier) { 'Tier 0' { 0 } 'Tier 1' { 1 } default { 2 } } } | Select-Object -First 1)
+
+                $pathNum++
+                $spCreds = $spDirectCreds[$sp.PrincipalId]
+                $spCredCount = if ($spCreds) { @($spCreds | Where-Object { -not $_.Expired }).Count } else { 0 }
+
+                $pathDef = $script:AttackPathDefs | Where-Object { $_.id -eq 'ROLE_BASED_SP_CONTROL' } | Select-Object -First 1
+                $paths += [PSCustomObject]@{
+                    PathNumber      = $pathNum
+                    PathType        = 'Role-Based SP Control'
+                    PathId          = 'ROLE_BASED_SP_CONTROL'
+                    Severity        = 'CRITICAL'
+                    UserDisplayName = $userAdminRole.PrincipalDisplayName
+                    UserUPN         = $userAdminRole.PrincipalUPN
+                    UserRole        = $userAdminRole.RoleName
+                    AppName         = $sp.PrincipalDisplayName
+                    AppId           = ''
+                    Permission      = $spRoles
+                    PermissionType  = 'DirectoryRole'
+                    Action          = "Add secret to SP (via $($userAdminRole.RoleName)) → authenticate as SP → use $($topRole.RoleName)"
+                    Result          = 'PRIVILEGE ESCALATION VIA SP'
+                    SPDirectCreds   = $spCredCount
+                    AppInstanceLock = 'N/A'
+                    Remediation     = if ($pathDef) { $pathDef.remediation -join '; ' } else { 'Use PIM for Application Administrator role; restrict SP role assignments' }
+                    UserEntraUrl    = Get-EntraUserUrl -ObjectId $userId
+                    AppEntraUrl     = Get-EntraAppUrl -ObjectId $sp.PrincipalId
+                }
+            }
+        }
+    }
+
+    # ── Check for unowned privileged apps ──────────────────────────────────
+    $unownedApps = @()
+    foreach ($appId in $appIds) {
+        $owners = $appOwners[$appId]
+        if (-not $owners -or $owners.Count -eq 0) {
+            $apps = $dangerousApps | Where-Object { $_.AppId -eq $appId }
+            $app = $apps | Select-Object -First 1
+            $spCreds = $spDirectCreds[$app.SPId]
+            $spCredCount = if ($spCreds) { @($spCreds | Where-Object { -not $_.Expired }).Count } else { 0 }
+            $lock = $appLockStatus[$appId]
+            $lockEnabled = if ($lock) { $lock.IsCredentialLocked } else { $false }
+            $unownedApps += [PSCustomObject]@{
+                AppName         = $app.SPDisplayName
+                AppId           = $appId
+                Permissions     = ($apps | ForEach-Object { $_.Permission }) -join ', '
+                SPDirectCreds   = $spCredCount
+                AppInstanceLock = if ($lockEnabled) { 'Enabled' } else { 'Disabled' }
+                EntraUrl        = Get-EntraAppUrl -ObjectId $app.SPId -AppId $app.AppId
+            }
+        }
+    }
+
+    # ── Display Results ────────────────────────────────────────────────────
+    if ($paths.Count -eq 0 -and $unownedApps.Count -eq 0) {
+        Write-Host "✓ No attack paths or unowned privileged apps found." -ForegroundColor Green
         return @()
     }
 
-    Write-Host "Found $($paths.Count) attack path(s):" -ForegroundColor Red
-    Write-Host ""
+    if ($paths.Count -gt 0) {
+        # Split paths by type for display
+        $ownerPaths = @($paths | Where-Object { $_.PathType -eq 'App Owner Escalation' })
+        $roleBasedPaths = @($paths | Where-Object { $_.PathType -eq 'Role-Based SP Control' })
 
-    foreach ($path in $paths) {
-        Write-SectionDivider "PATH $($path.PathNumber): $($path.PathType) ($($path.Severity))"
-        Write-Host "  ┌─────────────────────────────────────────────────────────────────────────┐" -ForegroundColor DarkYellow
-        Write-Host "  │  $($path.UserUPN)" -ForegroundColor White
-        Write-Host "  │  Role: $($path.UserRole)" -ForegroundColor Gray
-        Write-Host "  │                          ↓ owns" -ForegroundColor DarkGray
-        Write-Host "  │  App: `"$($path.AppName)`" ($($path.AppId))" -ForegroundColor White
-        Write-Host "  │  Permission: $($path.Permission) ($($path.PermissionType))" -ForegroundColor Yellow
-        Write-Host "  │                          ↓ can exploit" -ForegroundColor DarkGray
-        Write-Host "  │  Action: $($path.Action)" -ForegroundColor Red
-        Write-Host "  │  Result: $($path.Result)" -ForegroundColor Red
-        Write-Host "  └─────────────────────────────────────────────────────────────────────────┘" -ForegroundColor DarkYellow
+        Write-Host "Found $($paths.Count) attack path(s): $($ownerPaths.Count) App Owner Escalation, $($roleBasedPaths.Count) Role-Based SP Control" -ForegroundColor Red
+        Write-Host ""
 
-        $pathDef = $script:AttackPathDefs | Where-Object { $_.id -eq 'APP_OWNER_ESCALATION' } | Select-Object -First 1
+        # Display App Owner Escalation paths with full box format
+        foreach ($path in $ownerPaths) {
+            Write-SectionDivider "PATH $($path.PathNumber): $($path.PathType) ($($path.Severity))"
+            Write-Host "  ┌─────────────────────────────────────────────────────────────────────────┐" -ForegroundColor DarkYellow
+            Write-Host "  │  $($path.UserUPN)" -ForegroundColor White
+            Write-Host "  │  Role: $($path.UserRole)" -ForegroundColor Gray
+            Write-Host "  │                          ↓ owns" -ForegroundColor DarkGray
+            Write-Host "  │  App: `"$($path.AppName)`"$(if ($path.AppId) { " ($($path.AppId))" })" -ForegroundColor White
+            Write-Host "  │  Permission: $($path.Permission) ($($path.PermissionType))" -ForegroundColor Yellow
+            if ($path.SPDirectCreds -gt 0) {
+                Write-Host "  │  ⚠ SP has $($path.SPDirectCreds) direct credential(s) — hidden from portal" -ForegroundColor Red
+            }
+            if ($path.AppInstanceLock -eq 'Disabled') {
+                Write-Host "  │  ⚠ App Instance Lock: Disabled — SP creds can be added by owners" -ForegroundColor Yellow
+            }
+            Write-Host "  │                          ↓ can exploit" -ForegroundColor DarkGray
+            Write-Host "  │  Action: $($path.Action)" -ForegroundColor Red
+            Write-Host "  │  Result: $($path.Result)" -ForegroundColor Red
+            Write-Host "  └─────────────────────────────────────────────────────────────────────────┘" -ForegroundColor DarkYellow
+
+            $pathDef = $script:AttackPathDefs | Where-Object { $_.id -eq 'APP_OWNER_ESCALATION' } | Select-Object -First 1
+            if ($pathDef) {
+                Write-Recommendation -Items $pathDef.remediation
+            }
+        }
+
+        # Display Role-Based SP Control as a summary table (grouped by user)
+        if ($roleBasedPaths.Count -gt 0) {
+            Write-Host ""
+            Write-SectionDivider "ROLE-BASED SP CONTROL ($($roleBasedPaths.Count) paths)"
+            Write-Host "⚠  Users with Application Administrator / Cloud Application Administrator can" -ForegroundColor Yellow
+            Write-Host "   add secrets to ANY of the $(@($roleBasedPaths | ForEach-Object { $_.AppName } | Select-Object -Unique).Count) service principals below that hold privileged roles." -ForegroundColor Yellow
+            Write-Host ""
+
+            $roleBasedUsers = $roleBasedPaths | Group-Object UserUPN
+            foreach ($userGroup in $roleBasedUsers) {
+                $first = $userGroup.Group | Select-Object -First 1
+                Write-Host "  $($first.UserDisplayName) ($($first.UserUPN))" -ForegroundColor White
+                Write-Host "  Role: $($first.UserRole)  →  can control $($userGroup.Count) privileged SP(s):" -ForegroundColor Gray
+                $userGroup.Group | Select-Object @{N='  SP Name';E={$_.AppName}},
+                    @{N='SP Roles';E={$_.Permission}},
+                    @{N='SP Direct Creds';E={$_.SPDirectCreds}} |
+                    Format-Table -AutoSize | Out-String | Write-Host
+            }
+
+            $pathDef = $script:AttackPathDefs | Where-Object { $_.id -eq 'ROLE_BASED_SP_CONTROL' } | Select-Object -First 1
+            if ($pathDef) {
+                Write-Recommendation -Items $pathDef.remediation
+            }
+        }
+
+        Write-Reference 'https://posts.specterops.io/azure-privilege-escalation-via-service-principal-abuse-210ae2be2a5'
+    }
+
+    # Display unowned privileged apps
+    if ($unownedApps.Count -gt 0) {
+        Write-Host ""
+        Write-SectionDivider "UNOWNED PRIVILEGED APPS ($($unownedApps.Count))"
+        Write-Host "⚠  The following apps have dangerous permissions but NO assigned owners:" -ForegroundColor Yellow
+        Write-Host ""
+        $unownedApps | Select-Object @{N='App Name';E={$_.AppName}}, @{N='App ID';E={$_.AppId}},
+            @{N='Permissions';E={$_.Permissions}}, @{N='SP Direct Creds';E={$_.SPDirectCreds}},
+            @{N='Instance Lock';E={$_.AppInstanceLock}} |
+            Format-Table -AutoSize | Out-String | Write-Host
+
+        $pathDef = $script:AttackPathDefs | Where-Object { $_.id -eq 'UNOWNED_PRIVILEGED_APP' } | Select-Object -First 1
         if ($pathDef) {
             Write-Recommendation -Items $pathDef.remediation
         }
@@ -913,6 +1188,9 @@ function Invoke-AttackPathAnalysis {
     Write-Reference 'https://learn.microsoft.com/entra/identity/role-based-access-control/security-planning#protect-against-consent-grant-attacks'
 
     Export-AuditCsv -Name 'AttackPaths' -Data $paths
+    if ($unownedApps.Count -gt 0) {
+        Export-AuditCsv -Name 'UnownedPrivilegedApps' -Data $unownedApps
+    }
 
     return $paths
 }
@@ -938,10 +1216,15 @@ function Invoke-ShadowAdminDetection {
     $spIds = $spRoleAssignments | ForEach-Object { $_.PrincipalId } | Select-Object -Unique
     $spOwners = Get-ServicePrincipalOwners -SPIds $spIds
 
+    # Get SP-level credentials
+    $spDirectCreds = Get-SPDirectCredentials -SPIds $spIds
+
     $shadows = @()
     foreach ($spId in $spOwners.Keys) {
         $owners = $spOwners[$spId]
         $roles = $spRoleAssignments | Where-Object { $_.PrincipalId -eq $spId }
+        $spCreds = $spDirectCreds[$spId]
+        $spCredCount = if ($spCreds) { @($spCreds | Where-Object { -not $_.Expired }).Count } else { 0 }
         foreach ($owner in $owners) {
             if ($owner.id -in $privilegedUserIds) { continue } # Already an admin
             foreach ($role in $roles) {
@@ -951,6 +1234,7 @@ function Invoke-ShadowAdminDetection {
                     SPDisplayName    = $role.PrincipalDisplayName
                     SPId             = $spId
                     SPRole           = $role.RoleName
+                    SPDirectCreds    = $spCredCount
                     Risk             = "User can reset SP credentials → activate as SP → use $($role.RoleName) role"
                     Remediation      = 'Remove user as SP owner or remove the SP role assignment'
                     UserEntraUrl     = Get-EntraUserUrl -ObjectId $owner.id
@@ -972,6 +1256,9 @@ function Invoke-ShadowAdminDetection {
         Write-Host "  User:              $($s.UserUPN) (No privileged roles)" -ForegroundColor White
         Write-Host "  Owns SP:           `"$($s.SPDisplayName)`" (SP ID: $($s.SPId))" -ForegroundColor White
         Write-Host "  SP Has Role:       $($s.SPRole)" -ForegroundColor Yellow
+        if ($s.SPDirectCreds -gt 0) {
+            Write-Host "  SP Direct Creds:   ⚠ $($s.SPDirectCreds) credential(s) added directly to SP — hidden from portal" -ForegroundColor Red
+        }
         Write-Host "  Risk:              $($s.Risk)" -ForegroundColor Red
         Write-Host "  Remediation:       $($s.Remediation)" -ForegroundColor Green
         Write-Host ""
@@ -1211,60 +1498,92 @@ function Invoke-CredentialHygieneAudit {
     $appIds = $dangerousApps | ForEach-Object { $_.AppId } | Select-Object -Unique
     $appCreds = Get-AppCredentials -AppIds $appIds
 
+    # Also get SP-level credentials (added directly to SP object, hidden from portal)
+    $spIds = @($dangerousApps | ForEach-Object { $_.SPId } | Select-Object -Unique)
+    $spDirectCreds = Get-SPDirectCredentials -SPIds $spIds
+    $appLockStatus = Get-AppInstanceLockStatus -AppIds $appIds
+
     $results = @()
     foreach ($appId in $appIds) {
         $apps = $dangerousApps | Where-Object { $_.AppId -eq $appId }
         $app = $apps | Select-Object -First 1
         $creds = $appCreds[$appId]
 
-        if (-not $creds -or $creds.Count -eq 0) {
+        # SP-level credentials
+        $spCreds = $spDirectCreds[$app.SPId]
+        $spCredCount = if ($spCreds) { @($spCreds).Count } else { 0 }
+        $spValidCreds = if ($spCreds) { @($spCreds | Where-Object { -not $_.Expired }).Count } else { 0 }
+
+        # App instance lock
+        $lock = $appLockStatus[$appId]
+        $lockEnabled = if ($lock) { $lock.IsCredentialLocked } else { $false }
+
+        if ((-not $creds -or $creds.Count -eq 0) -and $spCredCount -eq 0) {
             $results += [PSCustomObject]@{
-                AppName        = $app.SPDisplayName
-                AppId          = $app.AppId
-                Permission     = ($apps | ForEach-Object { $_.Permission }) -join ', '
-                CredType       = 'None'
-                CredCount      = 0
-                ExpiredCount   = 0
-                RiskLevel      = 'ⓘ  INFO (no credentials)'
-                EntraPortalUrl = Get-EntraAppUrl -ObjectId $app.SPId -AppId $app.AppId
+                AppName          = $app.SPDisplayName
+                AppId            = $app.AppId
+                Permission       = ($apps | ForEach-Object { $_.Permission }) -join ', '
+                CredType         = 'None'
+                CredCount        = 0
+                ExpiredCount     = 0
+                SPDirectCreds    = 0
+                AppInstanceLock  = if ($lockEnabled) { 'Enabled' } else { 'Disabled' }
+                RiskLevel        = 'ⓘ  INFO (no credentials)'
+                EntraPortalUrl   = Get-EntraAppUrl -ObjectId $app.SPId -AppId $app.AppId
             }
             continue
         }
 
-        $credTypes = ($creds | ForEach-Object { $_.Type } | Select-Object -Unique) -join ', '
-        $secretCount = ($creds | Where-Object { $_.Type -eq 'Secret' } | Measure-Object).Count
-        $certCount = ($creds | Where-Object { $_.Type -eq 'Certificate' } | Measure-Object).Count
-        $fedCount = ($creds | Where-Object { $_.Type -eq 'Federated' } | Measure-Object).Count
-        $expiredCount = ($creds | Where-Object { $_.Expired } | Measure-Object).Count
+        $credTypes = @()
+        $secretCount = 0; $certCount = 0; $fedCount = 0; $expiredCount = 0; $totalCreds = 0
+        if ($creds -and $creds.Count -gt 0) {
+            $credTypes += ($creds | ForEach-Object { $_.Type } | Select-Object -Unique)
+            $secretCount = ($creds | Where-Object { $_.Type -eq 'Secret' } | Measure-Object).Count
+            $certCount = ($creds | Where-Object { $_.Type -eq 'Certificate' } | Measure-Object).Count
+            $fedCount = ($creds | Where-Object { $_.Type -eq 'Federated' } | Measure-Object).Count
+            $expiredCount = ($creds | Where-Object { $_.Expired } | Measure-Object).Count
+            $totalCreds = $creds.Count
+        }
+        if ($spCredCount -gt 0) {
+            $credTypes += ($spCreds | ForEach-Object { $_.Type } | Select-Object -Unique)
+            $expiredCount += ($spCreds | Where-Object { $_.Expired } | Measure-Object).Count
+            $totalCreds += $spCredCount
+        }
+        $credTypeStr = ($credTypes | Select-Object -Unique) -join ', '
 
         # Determine risk
         $riskLevel = '✓  GOOD'
-        if ($secretCount -gt 0 -and $creds.Count -gt 1) {
+        if ($spValidCreds -gt 0) {
+            $riskLevel = '⚠  CRITICAL (SP-level credentials — hidden from portal)'
+        } elseif ($secretCount -gt 0 -and $totalCreds -gt 1) {
             $riskLevel = '⚠  CRITICAL (multiple creds including secrets)'
         } elseif ($secretCount -gt 0) {
             $riskLevel = '⚠  HIGH (secret, not cert)'
         } elseif ($certCount -gt 0) {
             $riskLevel = '✓  MODERATE (cert is better, but permission is dangerous)'
         }
-        if ($fedCount -gt 0 -and $secretCount -eq 0 -and $certCount -eq 0) {
+        if ($fedCount -gt 0 -and $secretCount -eq 0 -and $certCount -eq 0 -and $spValidCreds -eq 0) {
             $riskLevel = '✓  GOOD (federated/managed identity)'
         }
 
         $results += [PSCustomObject]@{
-            AppName        = $app.SPDisplayName
-            AppId          = $app.AppId
-            Permission     = ($apps | ForEach-Object { $_.Permission }) -join ', '
-            CredType       = $credTypes
-            CredCount      = $creds.Count
-            ExpiredCount   = $expiredCount
-            RiskLevel      = $riskLevel
-            EntraPortalUrl = Get-EntraAppUrl -ObjectId $app.SPId -AppId $app.AppId
+            AppName          = $app.SPDisplayName
+            AppId            = $app.AppId
+            Permission       = ($apps | ForEach-Object { $_.Permission }) -join ', '
+            CredType         = $credTypeStr
+            CredCount        = $totalCreds
+            ExpiredCount     = $expiredCount
+            SPDirectCreds    = $spValidCreds
+            AppInstanceLock  = if ($lockEnabled) { 'Enabled' } else { 'Disabled' }
+            RiskLevel        = $riskLevel
+            EntraPortalUrl   = Get-EntraAppUrl -ObjectId $app.SPId -AppId $app.AppId
         }
     }
 
     $results | Select-Object @{N='App Name';E={$_.AppName}}, @{N='Permission';E={$_.Permission}},
         @{N='Cred Type';E={$_.CredType}}, @{N='Count';E={$_.CredCount}},
-        @{N='Expired';E={$_.ExpiredCount}}, @{N='Risk';E={$_.RiskLevel}} |
+        @{N='Expired';E={$_.ExpiredCount}}, @{N='SP Creds';E={$_.SPDirectCreds}},
+        @{N='Lock';E={$_.AppInstanceLock}}, @{N='Risk';E={$_.RiskLevel}} |
         Format-Table -AutoSize | Out-String | Write-Host
 
     # Summary
@@ -1273,6 +1592,8 @@ function Invoke-CredentialHygieneAudit {
     $fedApps = ($results | Where-Object { $_.CredType -match 'Federated' -and $_.CredType -notmatch 'Secret' -and $_.CredType -notmatch 'Certificate' } | Measure-Object).Count
     $totalExpired = ($results | Measure-Object -Property ExpiredCount -Sum).Sum
     $multiCred = ($results | Where-Object { $_.CredCount -gt 1 } | Measure-Object).Count
+    $spCredApps = ($results | Where-Object { $_.SPDirectCreds -gt 0 } | Measure-Object).Count
+    $unlocked = ($results | Where-Object { $_.AppInstanceLock -eq 'Disabled' -and $_.CredType -ne 'None' } | Measure-Object).Count
 
     Write-Host "SUMMARY:" -ForegroundColor Cyan
     Write-Host "  Apps using secrets:              $secretApps  ← migrate to certificates or managed identities" -ForegroundColor $(if ($secretApps -gt 0) { 'Yellow' } else { 'Green' })
@@ -1280,6 +1601,8 @@ function Invoke-CredentialHygieneAudit {
     Write-Host "  Apps using federated/managed:    $fedApps  ← best practice ✓" -ForegroundColor Green
     Write-Host "  Total expired credentials:       $totalExpired  ← remove to reduce attack surface" -ForegroundColor $(if ($totalExpired -gt 0) { 'Yellow' } else { 'Green' })
     Write-Host "  Apps with multiple credentials:  $multiCred  ← investigate, may indicate credential sprawl" -ForegroundColor $(if ($multiCred -gt 0) { 'Yellow' } else { 'Green' })
+    Write-Host "  Apps with SP-level credentials:  $spCredApps  ← HIDDEN from portal, investigate immediately" -ForegroundColor $(if ($spCredApps -gt 0) { 'Red' } else { 'Green' })
+    Write-Host "  App instance lock disabled:      $unlocked  ← enable to prevent SP credential injection" -ForegroundColor $(if ($unlocked -gt 0) { 'Yellow' } else { 'Green' })
 
     Write-Reference 'https://learn.microsoft.com/entra/identity/enterprise-apps/certificate-management'
 
@@ -1316,7 +1639,8 @@ function Invoke-FullAudit {
 
     $credResults = Invoke-CredentialHygieneAudit
     $secretApps = ($credResults | Where-Object { $_.CredType -match 'Secret' } | Measure-Object).Count
-    $summary['CredentialHygiene'] = "$secretApps high-privilege apps using secrets"
+    $spCredApps = ($credResults | Where-Object { $_.SPDirectCreds -gt 0 } | Measure-Object).Count
+    $summary['CredentialHygiene'] = "$secretApps high-privilege apps using secrets, $spCredApps with SP-level credentials"
 
     # Print summary
     Write-Banner "FULL AUDIT SUMMARY"
@@ -1327,7 +1651,7 @@ function Invoke-FullAudit {
     Write-Host "  Shadow Admins:         $($summary['ShadowAdmins'])" -ForegroundColor $(if ($shadowResults.Count -gt 0) { 'Red' } else { 'Green' })
     Write-Host "  Stale Privilege:       $($summary['StalePrivilege'])" -ForegroundColor $(if ($staleResults.Count -gt 0) { 'Yellow' } else { 'Green' })
     Write-Host "  Consent Risk:          $($summary['ConsentRisk'])" -ForegroundColor $(if ($criticalConsent -gt 0) { 'Yellow' } else { 'Green' })
-    Write-Host "  Credential Hygiene:    $($summary['CredentialHygiene'])" -ForegroundColor $(if ($secretApps -gt 0) { 'Yellow' } else { 'Green' })
+    Write-Host "  Credential Hygiene:    $($summary['CredentialHygiene'])" -ForegroundColor $(if ($secretApps -gt 0 -or $spCredApps -gt 0) { 'Yellow' } else { 'Green' })
 
     # Overall risk indicator
     $riskScore = 0
@@ -1364,6 +1688,9 @@ function Invoke-FullAudit {
     if ($secretApps -gt 0) {
         $actions += "Migrate $secretApps high-privilege app(s) from secrets to certificates"
     }
+    if ($spCredApps -gt 0) {
+        $actions += "Investigate $spCredApps app(s) with SP-level credentials (hidden from portal)"
+    }
 
     if ($actions.Count -gt 0) {
         Write-Host ""
@@ -1383,7 +1710,7 @@ function Invoke-FullAudit {
         [PSCustomObject]@{ Section = 'ShadowAdmins';       Finding = $summary['ShadowAdmins'];       Count = $shadowResults.Count }
         [PSCustomObject]@{ Section = 'StalePrivilege';     Finding = $summary['StalePrivilege'];     Count = $staleResults.Count }
         [PSCustomObject]@{ Section = 'ConsentRisk';        Finding = $summary['ConsentRisk'];        Count = $criticalConsent }
-        [PSCustomObject]@{ Section = 'CredentialHygiene';  Finding = $summary['CredentialHygiene'];  Count = $secretApps }
+        [PSCustomObject]@{ Section = 'CredentialHygiene';  Finding = $summary['CredentialHygiene'];  Count = "$secretApps secrets, $spCredApps SP-creds" }
         [PSCustomObject]@{ Section = 'OverallRisk';        Finding = $overallRisk;                   Count = $riskScore }
     )
     $actionNum = 0

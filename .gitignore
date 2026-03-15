@@ -27,3 +27,4 @@ config/local-*.json
 # Auto-downloaded Microsoft first-party app cache (refreshed daily)
 config/MicrosoftApps.json
 Full-results/
+tmp/

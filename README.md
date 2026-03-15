@@ -1,10 +1,10 @@
 # Privileged App Path Auditor
 
-> **Version 0.4.0**
+> **Version 0.5.0**
 
 A PowerShell tool that maps privilege escalation attack paths through Entra ID application ownership. If a regular user owns an app registration that has `RoleManagement.ReadWrite.Directory`, `AppRoleAssignment.ReadWrite.All`, or another Global Admin-equivalent permission, that user can add a secret to the app, authenticate as it, and **silently become a Global Administrator** — no alerts, no approval, no MFA. This tool finds every one of those paths in your tenant.
 
-It also detects shadow admins, stale high-privilege apps, credential hygiene issues, and consent policy weaknesses — all in a single script with zero cost and no dependencies beyond the Microsoft Graph PowerShell SDK.
+It also detects **role-based SP control** (Application Administrators who can add secrets to *any* SP with privileged roles — the [most common real-world escalation to Global Admin](https://posts.specterops.io/azure-privilege-escalation-via-service-principal-abuse-210ae2be2a5)), **SP-level credentials** hidden from the Entra portal, **unowned privileged apps** with no accountability, **app instance property lock** status, shadow admins, stale high-privilege apps, credential hygiene issues, and consent policy weaknesses — all in a single script with zero cost and no dependencies beyond the Microsoft Graph PowerShell SDK.
 
 > **No files are created unless you ask for them.** By default the script prints findings to the console only — no CSVs, no exports, no files written anywhere. To generate CSV reports, explicitly pass the `-ExportPath` parameter:
 > ```powershell
@@ -42,12 +42,23 @@ This tool answers that question — and several others — by mapping the actual
 |---|---|
 | `PermissionAudit` | App registrations and service principals with Global Admin-equivalent permissions |
 | `RoleAudit` | Users who hold privileged directory roles vs. those who don't |
-| `AttackPath` | End-to-end paths from unprivileged user → app ownership → privilege escalation |
-| `ShadowAdmins` | Users who own service principals that hold privileged directory roles |
+| `AttackPath` | End-to-end paths: app owner escalation, **role-based SP control** (App Admin → any SP), and **unowned privileged apps** — enriched with SP-level credential counts and app instance lock status |
+| `ShadowAdmins` | Users who own service principals that hold privileged directory roles, with **SP-level credential visibility** |
 | `StalePrivilege` | Dormant high-privilege apps with valid credentials and no recent sign-ins |
 | `ConsentRisk` | Tenant consent policy configuration weaknesses |
-| `CredentialHygiene` | High-privilege apps using secrets instead of certificates or managed identities |
+| `CredentialHygiene` | Credential type/count for high-privilege apps, including **SP-level credentials** (hidden from portal) and **app instance property lock** status |
 | `Full` | Runs all of the above |
+
+### What's New in v0.5.0
+
+This release adds four new detection capabilities based on [Andy Robbins' (SpecterOps) research](https://posts.specterops.io/azure-privilege-escalation-via-service-principal-abuse-210ae2be2a5) on real-world Azure privilege escalation:
+
+| Feature | Description |
+|---|---|
+| **Role-Based SP Control** | Detects users with Application Administrator or Cloud Application Administrator who can add secrets to *any* SP in the tenant — including SPs with Global Admin. This is the most common real-world escalation to GA. |
+| **SP-Level Credentials** | Queries credentials added directly to the service principal object (`passwordCredentials`, `keyCredentials`). These are **not visible in the Entra portal** app registration blade and are a known persistence technique. |
+| **App Instance Property Lock** | Checks `servicePrincipalLockConfiguration` on each application. When disabled, SP owners can inject credentials directly into the SP object. |
+| **Unowned Privileged Apps** | Flags apps with GA-equivalent permissions that have zero owners — no accountability for credential rotation or access review. |
 
 ## Prerequisites
 
@@ -154,6 +165,7 @@ One CSV per mode is created in the export directory:
 | `PermissionAudit.csv` | PermissionAudit | App link |
 | `RoleAudit.csv` | RoleAudit | User link |
 | `AttackPaths.csv` | AttackPath | App + User links |
+| `UnownedPrivilegedApps.csv` | AttackPath | App link |
 | `ShadowAdmins.csv` | ShadowAdmins | SP + User links |
 | `StalePrivilege.csv` | StalePrivilege | App link |
 | `ConsentRisk.csv` | ConsentRisk | — |
