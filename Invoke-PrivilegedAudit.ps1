@@ -35,6 +35,9 @@
     .\Invoke-PrivilegedAudit.ps1 -Mode AttackPath -ExportPath ./audit-results
     .\Invoke-PrivilegedAudit.ps1 -Mode StalePrivilege -InactiveDays 60
 
+.NOTES
+    Version: 0.1.0
+
 .LINK
     https://github.com/yourusername/privilidged-app-path
 #>
@@ -50,6 +53,8 @@ param(
 
     [string]$ConfigPath = (Join-Path $PSScriptRoot 'config')
 )
+
+$script:Version = '0.1.0'
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
