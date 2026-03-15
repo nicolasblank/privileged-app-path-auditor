@@ -332,6 +332,7 @@ function Connect-GraphIfNeeded {
     if ($context) {
         $missing = $requiredScopes | Where-Object { $_ -notin $context.Scopes }
         if ($missing.Count -eq 0) {
+            $script:ConnectedTenantId = $context.TenantId
             Write-Host "✓ Already connected to Microsoft Graph as $($context.Account)" -ForegroundColor Green
             return
         }
@@ -342,6 +343,7 @@ function Connect-GraphIfNeeded {
     Write-Host "Connecting to Microsoft Graph..." -ForegroundColor Cyan
     Connect-MgGraph -Scopes $requiredScopes -NoWelcome
     $ctx = Get-MgContext
+    $script:ConnectedTenantId = $ctx.TenantId
     Write-Host "✓ Connected as $($ctx.Account) (TenantId: $($ctx.TenantId))" -ForegroundColor Green
 }
 
@@ -370,17 +372,48 @@ function Get-ServicePrincipalsWithAppRoles {
     Write-Host "  Querying service principals and app role assignments..." -ForegroundColor Gray
     $sps = Get-AllGraphPages -Uri 'https://graph.microsoft.com/v1.0/servicePrincipals?$select=id,appId,displayName,appOwnerOrganizationId,servicePrincipalType,accountEnabled&$top=999'
 
+    # Classify service principals
+    $microsoftOwnerIds = @(
+        'f8cdef31-a31e-4b4a-93e4-5f571e91255a'  # Microsoft Services
+        '72f988bf-86f1-41af-91ab-2d7cd011db47'  # Microsoft Corp
+        'cdc5aeea-15c5-4db6-b079-fcadd2505dc2'  # Microsoft (additional)
+    )
+    $totalAll = ($sps | Measure-Object).Count
+    $microsoftSPs = @($sps | Where-Object {
+        $script:MicrosoftAppIds.Contains($_.appId) -or $_.appOwnerOrganizationId -in $microsoftOwnerIds
+    })
+    $homeTenantSPs = @($sps | Where-Object {
+        $_.appOwnerOrganizationId -eq $script:ConnectedTenantId -and
+        -not ($script:MicrosoftAppIds.Contains($_.appId))
+    })
+    $crossTenantSPs = @($sps | Where-Object {
+        $_.appOwnerOrganizationId -and
+        $_.appOwnerOrganizationId -ne $script:ConnectedTenantId -and
+        -not ($script:MicrosoftAppIds.Contains($_.appId) -or $_.appOwnerOrganizationId -in $microsoftOwnerIds)
+    })
+    $unknownOwnerSPs = @($sps | Where-Object {
+        -not $_.appOwnerOrganizationId -and
+        -not ($script:MicrosoftAppIds.Contains($_.appId))
+    })
+
+    Write-Host "" -ForegroundColor Gray
+    Write-Host "  Service Principal Summary:" -ForegroundColor Gray
+    Write-Host "    Total:                    $totalAll" -ForegroundColor Gray
+    Write-Host "    Microsoft first-party:    $($microsoftSPs.Count)" -ForegroundColor DarkGray
+    Write-Host "    Home tenant:              $($homeTenantSPs.Count)" -ForegroundColor Gray
+    Write-Host "    Third-party (cross-tenant):$($crossTenantSPs.Count)" -ForegroundColor Gray
+    if ($unknownOwnerSPs.Count -gt 0) {
+        Write-Host "    Unknown owner:            $($unknownOwnerSPs.Count)" -ForegroundColor DarkGray
+    }
+    Write-Host "" -ForegroundColor Gray
+
     # Filter first-party Microsoft apps if configured
     # Uses the merill/microsoft-info lookup (4000+ known app IDs) with fallback to appOwnerOrganizationId
     if ($script:AuditConfig.filters.excludeFirstPartyMicrosoftApps) {
-        $microsoftOwnerIds = @(
-            'f8cdef31-a31e-4b4a-93e4-5f571e91255a'  # Microsoft Services
-            '72f988bf-86f1-41af-91ab-2d7cd011db47'  # Microsoft Corp
-            'cdc5aeea-15c5-4db6-b079-fcadd2505dc2'  # Microsoft (additional)
-        )
         $sps = @($sps | Where-Object {
             -not ($script:MicrosoftAppIds.Contains($_.appId) -or $_.appOwnerOrganizationId -in $microsoftOwnerIds)
         })
+        Write-Host "  Scanning $($sps.Count) non-Microsoft SPs for dangerous permissions..." -ForegroundColor Gray
     }
     if (@($script:AuditConfig.filters.excludeAppIds).Count -gt 0) {
         $sps = @($sps | Where-Object { $_.appId -notin $script:AuditConfig.filters.excludeAppIds })

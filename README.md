@@ -371,9 +371,29 @@ Source: [Microsoft Entra built-in roles](https://learn.microsoft.com/entra/ident
 
 1. Connects to Microsoft Graph using interactive delegated authentication (`Connect-MgGraph`)
 2. Queries service principals, app role assignments, directory role assignments, sign-in activity, consent grants, and authorization policies using read-only Graph API calls
-3. Cross-references the data to map relationships (user → owns app → app has permission → escalation path)
-4. Outputs findings to the console with actionable remediation guidance
-5. Optionally exports results to CSV files for reporting
+3. Classifies all service principals and displays a summary before scanning:
+
+```
+  Service Principal Summary:
+    Total:                    1298
+    Microsoft first-party:    1014
+    Home tenant:              91
+    Third-party (cross-tenant):179
+    Unknown owner:            14
+
+  Scanning 284 non-Microsoft SPs for dangerous permissions...
+```
+
+| Category | Description |
+|---|---|
+| **Microsoft first-party** | Apps owned by Microsoft — identified using the [merill/microsoft-info](https://github.com/merill/microsoft-info) database (4,000+ known app IDs, refreshed daily) and `appOwnerOrganizationId`. All are cross-tenant by nature but are a known quantity. |
+| **Home tenant** | Apps your organization registered in Entra ID |
+| **Third-party (cross-tenant)** | Apps from non-Microsoft external vendors (SaaS products you've consented to). These are typically the highest-risk category — they originate from another organization's tenant and have been granted permissions in yours. |
+| **Unknown owner** | No `appOwnerOrganizationId` and not in the Microsoft lookup. May be legacy apps or apps with incomplete metadata. |
+
+4. Cross-references the data to map relationships (user → owns app → app has permission → escalation path)
+5. Outputs findings to the console with actionable remediation guidance
+6. Optionally exports results to CSV files for reporting
 
 ## Limitations
 
