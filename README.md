@@ -62,19 +62,85 @@ All read-only. The tool never modifies your tenant.
 
 ## Usage
 
+### Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-Mode` | String | *(required)* | Audit mode to run — see table below |
+| `-ExportPath` | String | *(none)* | Directory for CSV export. Created if it doesn't exist |
+| `-InactiveDays` | Int | `90` | Days of inactivity before an app is flagged as stale |
+| `-ConfigPath` | String | `./config` | Path to config directory. Falls back to built-in defaults if missing |
+
+### Modes
+
+| Mode | What It Does | Typical Runtime |
+|---|---|---|
+| `PermissionAudit` | Flags apps with GA-equivalent application permissions | ~2 min |
+| `RoleAudit` | Lists users in/out of privileged directory roles | ~3 sec |
+| `AttackPath` | Maps user → app owner → privilege escalation chains | ~2 min |
+| `ShadowAdmins` | Finds users who own SPs that hold privileged roles | ~3 sec |
+| `StalePrivilege` | Dormant high-privilege apps with valid credentials | ~2 min |
+| `ConsentRisk` | Evaluates tenant consent policy and user-consented apps | ~40 sec |
+| `CredentialHygiene` | Audits credential type/count for high-privilege apps | ~2 min |
+| `Full` | Runs all modes sequentially | ~9 min |
+
+### Getting Started
+
 ```powershell
-# Run the full audit (all modes)
+# Run the full audit — the best first run
 .\Invoke-PrivilegedAudit.ps1 -Mode Full
 
-# Run a specific mode
+# Run a single focused audit
 .\Invoke-PrivilegedAudit.ps1 -Mode AttackPath
-
-# Export results to CSV files in a folder
-.\Invoke-PrivilegedAudit.ps1 -Mode Full -ExportPath ./audit-results
-
-# Specify how many days of inactivity counts as "stale" (default: 90)
-.\Invoke-PrivilegedAudit.ps1 -Mode StalePrivilege -InactiveDays 60
 ```
+
+### Exporting Results
+
+```powershell
+# Export all modes to CSV files
+.\Invoke-PrivilegedAudit.ps1 -Mode Full -ExportPath ./audit-results
+```
+
+One CSV per mode is created in the export directory:
+
+| File | Source Mode |
+|---|---|
+| `PermissionAudit.csv` | PermissionAudit |
+| `RoleAudit.csv` | RoleAudit |
+| `AttackPaths.csv` | AttackPath |
+| `StalePrivilege.csv` | StalePrivilege |
+| `ConsentRisk.csv` | ConsentRisk |
+| `CredentialHygiene.csv` | CredentialHygiene |
+
+### Adjusting Stale Threshold
+
+```powershell
+# Flag apps inactive for 30+ days instead of the default 90
+.\Invoke-PrivilegedAudit.ps1 -Mode StalePrivilege -InactiveDays 30
+```
+
+### Using a Custom Config Directory
+
+```powershell
+# Point to a custom config directory
+.\Invoke-PrivilegedAudit.ps1 -Mode Full -ConfigPath /path/to/custom-config
+
+# If the path doesn't exist, built-in defaults are used (no error)
+.\Invoke-PrivilegedAudit.ps1 -Mode Full -ConfigPath /nonexistent
+```
+
+### Recommended Workflow
+
+1. **First run** — `Full` mode with export to get a baseline:
+   ```powershell
+   .\Invoke-PrivilegedAudit.ps1 -Mode Full -ExportPath ./audit-results
+   ```
+2. **Triage** — focus on `AttackPath` and `ShadowAdmins` results first (highest risk)
+3. **Remediate** — remove dangerous owners, revoke unused permissions, delete stale apps
+4. **Re-run** individual modes after remediation to verify fixes:
+   ```powershell
+   .\Invoke-PrivilegedAudit.ps1 -Mode AttackPath
+   ```
 
 ## Example Output
 
