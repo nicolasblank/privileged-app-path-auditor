@@ -45,7 +45,7 @@ This tool answers that question — and several others — by mapping the actual
 
 ## Prerequisites
 
-- **PowerShell 7+**
+- **PowerShell 7+** — if you only have Windows PowerShell 5.1 (the blue one), install PowerShell 7 from [https://aka.ms/powershell](https://aka.ms/powershell). On macOS/Linux: `brew install powershell` or see the [install docs](https://learn.microsoft.com/powershell/scripting/install/installing-powershell).
 - **Microsoft Graph PowerShell SDK** modules:
   - `Microsoft.Graph.Applications`
   - `Microsoft.Graph.Identity.DirectoryManagement`
@@ -104,7 +104,23 @@ All read-only. The tool never modifies your tenant.
 
 > **Note:** Typical runtimes were measured against a real Entra ID tenant with ~1,300 service principals. Your results will vary depending on tenant size and network latency.
 
-### Getting Started
+### Getting the Tool
+
+**Option A — Download ZIP (no Git required)**
+
+1. Go to [github.com/nicolasblank/privileged-app-path-auditor](https://github.com/nicolasblank/privileged-app-path-auditor)
+2. Click the green **Code** button → **Download ZIP**
+3. Extract the ZIP to a folder on your machine (e.g. `C:\Tools\privileged-app-path-auditor`)
+4. Open PowerShell 7 and `cd` into that folder
+
+**Option B — Git clone**
+
+```powershell
+git clone https://github.com/nicolasblank/privileged-app-path-auditor.git
+cd privileged-app-path-auditor
+```
+
+### Running the Audit
 
 ```powershell
 # Run the full audit — the best first run
@@ -113,6 +129,8 @@ All read-only. The tool never modifies your tenant.
 # Run a single focused audit
 .\Invoke-PrivilegedAudit.ps1 -Mode AttackPath
 ```
+
+The script will call `Connect-MgGraph` automatically if you are not already connected. A browser window will open for interactive sign-in — sign in with a Global Reader (or equivalent) account in the tenant you want to audit.
 
 ### Exporting Results
 
