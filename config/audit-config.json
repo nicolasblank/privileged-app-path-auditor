@@ -1,0 +1,32 @@
+{
+  "$schema": "./schema/audit-config.schema.json",
+  "description": "Runtime configuration for the Privileged App Path Auditor. These settings control thresholds, exclusions, and behavior. Override values here to customize for your environment.",
+  "version": "1.0",
+  "lastUpdated": "2026-03-15",
+  "stalePrivilege": {
+    "inactiveDays": 90,
+    "description": "Number of days without a sign-in before an app is considered stale"
+  },
+  "filters": {
+    "excludeDisabledApps": false,
+    "excludeFirstPartyMicrosoftApps": true,
+    "excludeAppIds": [],
+    "description": "Filter settings. excludeFirstPartyMicrosoftApps skips apps owned by Microsoft (publisher ID f8cdef31-a31e-4b4a-93e4-5f571e91255a) to focus on tenant-owned apps."
+  },
+  "consentRisk": {
+    "flagUserConsentedApps": true,
+    "description": "When true, ConsentRisk mode will enumerate apps that received user consent (not admin consent)"
+  },
+  "credentialHygiene": {
+    "preferredCredentialTypes": ["Certificate", "FederatedIdentityCredential"],
+    "riskyCredentialTypes": ["Password"],
+    "flagMultipleCredentials": true,
+    "flagExpiredCredentials": true,
+    "description": "Credential type risk classification. Certificates and federated credentials are preferred over secrets (passwords)."
+  },
+  "output": {
+    "maxUsersInRoleAuditList": 500,
+    "truncateAfter": 50,
+    "description": "Controls output size. Users beyond truncateAfter are summarized as '... (N more)' in console output. Full data is always included in CSV exports."
+  }
+}

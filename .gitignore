@@ -1,0 +1,25 @@
+# Audit results output
+audit-results/
+
+# PowerShell module artifacts
+*.psm1.bak
+*.psd1.bak
+
+# Editor and IDE
+.vscode/
+*.code-workspace
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+
+# User-specific config overrides (uncommitted)
+config/local-*.json

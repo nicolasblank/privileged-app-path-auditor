@@ -1,0 +1,157 @@
+{
+  "$schema": "./schema/attack-paths.schema.json",
+  "description": "Attack path definitions and remediation guidance. Each path describes how an unprivileged user can escalate to Global Administrator-equivalent access through Entra ID misconfigurations.",
+  "version": "1.0",
+  "lastUpdated": "2026-03-15",
+  "paths": [
+    {
+      "id": "APP_OWNER_ESCALATION",
+      "name": "App Owner Escalation",
+      "severity": "Critical",
+      "description": "A non-admin user owns an app registration that has dangerous application permissions. The user can add a new secret/certificate, authenticate as the app, and inherit its permissions.",
+      "chain": [
+        "User (no privileged role)",
+        "Owns App Registration",
+        "App has dangerous application permission",
+        "User adds secret/certificate to app",
+        "User authenticates as app using new credential",
+        "User inherits app's dangerous permissions"
+      ],
+      "detection": {
+        "method": "Cross-reference app owners (non-admins) with apps that have dangerous permissions",
+        "graphQueries": [
+          "GET /applications/{id}/owners",
+          "GET /servicePrincipals/{id}/appRoleAssignments"
+        ]
+      },
+      "remediation": [
+        "Remove the non-admin user as owner of the app",
+        "Replace the dangerous permission with a least-privilege alternative",
+        "Apply Conditional Access for workload identities on the service principal",
+        "Use Managed Identity instead of app registration where possible"
+      ],
+      "references": [
+        "https://learn.microsoft.com/entra/identity/role-based-access-control/security-planning",
+        "https://learn.microsoft.com/entra/identity/enterprise-apps/manage-application-permissions"
+      ]
+    },
+    {
+      "id": "SHADOW_ADMIN_SP",
+      "name": "Shadow Admin via Service Principal Role",
+      "severity": "Critical",
+      "description": "A non-admin user owns a service principal that holds a privileged directory role. The user can reset the SP's credentials and act as the SP, inheriting its role.",
+      "chain": [
+        "User (no privileged role)",
+        "Owns Service Principal",
+        "Service Principal has privileged directory role",
+        "User resets SP credentials",
+        "User authenticates as SP",
+        "User inherits SP's privileged role"
+      ],
+      "detection": {
+        "method": "Cross-reference SP owners (non-admins) with SPs that hold privileged directory roles",
+        "graphQueries": [
+          "GET /servicePrincipals/{id}/owners",
+          "GET /roleManagement/directory/roleAssignments?$filter=principalId eq '{spId}'"
+        ]
+      },
+      "remediation": [
+        "Remove the non-admin user as owner of the service principal",
+        "Remove the privileged directory role from the service principal",
+        "Use PIM for just-in-time role activation instead of permanent assignments"
+      ],
+      "references": [
+        "https://learn.microsoft.com/entra/identity/role-based-access-control/privileged-roles-permissions"
+      ]
+    },
+    {
+      "id": "CONSENT_GRANT_ATTACK",
+      "name": "Consent Grant Attack",
+      "severity": "High",
+      "description": "If tenant policy allows user consent, a phishing attack can trick users into granting OAuth consent to a malicious app, giving the attacker access to user data.",
+      "chain": [
+        "Tenant allows user consent for apps",
+        "User is targeted by phishing",
+        "User grants OAuth consent to malicious app",
+        "Malicious app accesses user's mail, files, or profile"
+      ],
+      "detection": {
+        "method": "Check tenant authorization policy for user consent settings; enumerate user-consented OAuth2 permission grants",
+        "graphQueries": [
+          "GET /policies/authorizationPolicy",
+          "GET /oauth2PermissionGrants?$filter=consentType eq 'Principal'"
+        ]
+      },
+      "remediation": [
+        "Set user consent to 'Do not allow user consent' or 'Allow for verified publishers only'",
+        "Enable admin consent workflow so users can request access",
+        "Review and revoke suspicious user-consented permissions",
+        "Configure risk-based consent evaluation policies"
+      ],
+      "references": [
+        "https://learn.microsoft.com/entra/identity/enterprise-apps/configure-user-consent",
+        "https://learn.microsoft.com/entra/identity/enterprise-apps/manage-application-permissions"
+      ]
+    },
+    {
+      "id": "STALE_APP_EXPLOITATION",
+      "name": "Stale App Credential Exploitation",
+      "severity": "High",
+      "description": "A high-privilege app has not signed in for an extended period but still has valid credentials. An attacker who obtains the credentials can authenticate as the app and exploit its permissions.",
+      "chain": [
+        "App has dangerous permissions",
+        "App has not signed in for 90+ days",
+        "App still has valid (non-expired) credentials",
+        "Attacker discovers credentials (repo leak, config file, etc.)",
+        "Attacker authenticates as app",
+        "Attacker inherits dangerous permissions"
+      ],
+      "detection": {
+        "method": "Cross-reference high-privilege apps with sign-in activity and credential expiry dates",
+        "graphQueries": [
+          "GET /servicePrincipals/{id}/appRoleAssignments",
+          "GET /reports/servicePrincipalSignInActivities",
+          "GET /applications/{id}?$select=passwordCredentials,keyCredentials"
+        ]
+      },
+      "remediation": [
+        "Disable or delete the app if no longer needed",
+        "Remove the dangerous permissions if the app is still needed",
+        "Rotate and then revoke the credentials",
+        "Set up alerts for sign-in activity on high-privilege apps"
+      ],
+      "references": [
+        "https://learn.microsoft.com/entra/identity/enterprise-apps/manage-application-permissions"
+      ]
+    },
+    {
+      "id": "CREDENTIAL_THEFT_SECRET",
+      "name": "Credential Theft via Client Secret",
+      "severity": "High",
+      "description": "A high-privilege app uses a client secret (plain text string) rather than a certificate or managed identity. Secrets are easier to exfiltrate from code repos, config files, or environment variables.",
+      "chain": [
+        "App has dangerous permissions",
+        "App uses client secret (not certificate or managed identity)",
+        "Secret stored in code repo, config file, Key Vault, or environment variable",
+        "Attacker gains access to secret storage",
+        "Attacker authenticates as app using secret",
+        "Attacker inherits dangerous permissions"
+      ],
+      "detection": {
+        "method": "Check credential types on high-privilege apps; flag password credentials over certificates or federated credentials",
+        "graphQueries": [
+          "GET /applications/{id}?$select=passwordCredentials,keyCredentials,federatedIdentityCredentials"
+        ]
+      },
+      "remediation": [
+        "Migrate from client secret to certificate authentication",
+        "Use Managed Identity where the app runs in Azure",
+        "Use Federated Identity Credentials for external workloads (GitHub Actions, etc.)",
+        "If secrets are required, store them in Azure Key Vault with access policies"
+      ],
+      "references": [
+        "https://learn.microsoft.com/entra/identity/enterprise-apps/certificate-management"
+      ]
+    }
+  ]
+}

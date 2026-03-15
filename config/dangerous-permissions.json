@@ -1,0 +1,48 @@
+{
+  "$schema": "./schema/dangerous-permissions.schema.json",
+  "description": "Application permissions that grant Global Administrator equivalence. These permissions allow an app to escalate privileges, assign roles, or modify any directory object — effectively equivalent to Global Administrator.",
+  "version": "1.0",
+  "lastUpdated": "2026-03-15",
+  "permissions": [
+    {
+      "name": "RoleManagement.ReadWrite.Directory",
+      "type": "Application",
+      "risk": "Critical",
+      "reason": "Can assign any Entra ID role to any principal, including Global Administrator",
+      "attackAction": "Assign Global Administrator role to itself or any user/app",
+      "reference": "https://learn.microsoft.com/graph/permissions-reference#rolemanagementreadwritedirectory"
+    },
+    {
+      "name": "AppRoleAssignment.ReadWrite.All",
+      "type": "Application",
+      "risk": "Critical",
+      "reason": "Can grant itself or any app any application permission, including other dangerous ones",
+      "attackAction": "Grant itself RoleManagement.ReadWrite.Directory, then assign Global Admin",
+      "reference": "https://learn.microsoft.com/graph/permissions-reference#approleassignmentreadwriteall"
+    },
+    {
+      "name": "Application.ReadWrite.All",
+      "type": "Application",
+      "risk": "Critical",
+      "reason": "Can modify any app registration's credentials, then authenticate as that app and inherit its permissions",
+      "attackAction": "Add secret to a high-privilege app, authenticate as it, use its permissions",
+      "reference": "https://learn.microsoft.com/graph/permissions-reference#applicationreadwriteall"
+    },
+    {
+      "name": "Directory.ReadWrite.All",
+      "type": "Application",
+      "risk": "High",
+      "reason": "Near-full write access to all directory objects including users, groups, apps, and service principals",
+      "attackAction": "Modify group memberships, app owners, or other directory objects to gain indirect privilege",
+      "reference": "https://learn.microsoft.com/graph/permissions-reference#directoryreadwriteall"
+    },
+    {
+      "name": "Directory.AccessAsUser.All",
+      "type": "Delegated",
+      "risk": "Critical",
+      "reason": "Highest privileged delegated permission — grants full directory access as the signed-in user",
+      "attackAction": "If user is a Global Admin, the app inherits full Global Admin access via delegation",
+      "reference": "https://learn.microsoft.com/graph/permissions-overview#best-practices-for-using-microsoft-graph-permissions"
+    }
+  ]
+}
