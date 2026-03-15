@@ -299,6 +299,24 @@ function Write-Reference {
     Write-Host "Reference: $Url" -ForegroundColor DarkCyan
 }
 
+function Get-EntraAppUrl {
+    param([string]$ObjectId, [string]$AppId)
+    if ($ObjectId -and $AppId) {
+        return "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/$ObjectId/appId/$AppId"
+    } elseif ($ObjectId) {
+        return "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/$ObjectId"
+    }
+    return ''
+}
+
+function Get-EntraUserUrl {
+    param([string]$ObjectId)
+    if ($ObjectId) {
+        return "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/UserDetailsMenuBlade/~/Profile/userId/$ObjectId"
+    }
+    return ''
+}
+
 function Export-AuditCsv {
     param(
         [string]$Name,
@@ -493,6 +511,7 @@ function Get-ServicePrincipalsWithAppRoles {
                     Risk            = $permDef.risk
                     Reason          = $permDef.reason
                     AccountEnabled  = $sp.accountEnabled
+                    EntraPortalUrl  = Get-EntraAppUrl -ObjectId $sp.id -AppId $sp.appId
                 }
             }
         }
@@ -519,6 +538,7 @@ function Get-ServicePrincipalsWithAppRoles {
                         Risk            = $dp.risk
                         Reason          = $dp.reason
                         AccountEnabled  = $clientSP.accountEnabled
+                        EntraPortalUrl  = Get-EntraAppUrl -ObjectId $clientSP.id -AppId $clientSP.appId
                     }
                 }
             }
@@ -793,14 +813,17 @@ function Invoke-RoleAudit {
 
     # Export
     $exportData = @()
-    foreach ($u in $userRoles.Values) {
+    foreach ($userId in $userRoles.Keys) {
+        $u = $userRoles[$userId]
         $exportData += [PSCustomObject]@{
             DisplayName = $u.DisplayName; UPN = $u.UPN; Roles = ($u.Roles -join '; '); HasPrivilegedRole = $true
+            EntraPortalUrl = Get-EntraUserUrl -ObjectId $userId
         }
     }
     foreach ($u in $nonPrivilegedUsers) {
         $exportData += [PSCustomObject]@{
             DisplayName = $u.displayName; UPN = $u.userPrincipalName; Roles = ''; HasPrivilegedRole = $false
+            EntraPortalUrl = Get-EntraUserUrl -ObjectId $u.id
         }
     }
     Export-AuditCsv -Name 'RoleAudit' -Data $exportData
@@ -853,6 +876,8 @@ function Invoke-AttackPathAnalysis {
                     Action          = "Add secret → authenticate as app → exploit $($app.Permission)"
                     Result          = 'GLOBAL ADMIN EQUIVALENT ACCESS'
                     Remediation     = if ($pathDef) { $pathDef.remediation -join '; ' } else { 'Remove owner or reduce permissions' }
+                    UserEntraUrl    = Get-EntraUserUrl -ObjectId $owner.id
+                    AppEntraUrl     = Get-EntraAppUrl -ObjectId $app.SPId -AppId $app.AppId
                 }
             }
         }
@@ -928,6 +953,8 @@ function Invoke-ShadowAdminDetection {
                     SPRole           = $role.RoleName
                     Risk             = "User can reset SP credentials → activate as SP → use $($role.RoleName) role"
                     Remediation      = 'Remove user as SP owner or remove the SP role assignment'
+                    UserEntraUrl     = Get-EntraUserUrl -ObjectId $owner.id
+                    SPEntraUrl       = Get-EntraAppUrl -ObjectId $spId
                 }
             }
         }
@@ -1019,6 +1046,7 @@ function Invoke-StalePrivilegeDetection {
                 CredentialType    = $credType
                 CredentialExpires = if ($credExpiry) { ([datetime]$credExpiry).ToString('yyyy-MM-dd') } else { 'N/A' }
                 ValidCredCount    = $validCreds.Count
+                EntraPortalUrl    = Get-EntraAppUrl -ObjectId $a.SPId -AppId $a.AppId
             }
         }
     }
@@ -1198,6 +1226,7 @@ function Invoke-CredentialHygieneAudit {
                 CredCount      = 0
                 ExpiredCount   = 0
                 RiskLevel      = 'ⓘ  INFO (no credentials)'
+                EntraPortalUrl = Get-EntraAppUrl -ObjectId $app.SPId -AppId $app.AppId
             }
             continue
         }
@@ -1229,6 +1258,7 @@ function Invoke-CredentialHygieneAudit {
             CredCount      = $creds.Count
             ExpiredCount   = $expiredCount
             RiskLevel      = $riskLevel
+            EntraPortalUrl = Get-EntraAppUrl -ObjectId $app.SPId -AppId $app.AppId
         }
     }
 
