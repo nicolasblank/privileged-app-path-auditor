@@ -132,7 +132,7 @@ $script:DefaultAttackPaths = @(
     }
 )
 
-function Load-Config {
+function Initialize-Config {
     $script:DangerousPermissions = $script:DefaultDangerousPermissions
     $script:PrivilegedRoles      = $script:DefaultPrivilegedRoles
     $script:AuditConfig          = $script:DefaultAuditConfig
@@ -858,7 +858,6 @@ function Invoke-StalePrivilegeDetection {
 
     foreach ($appId in $appIds) {
         $apps = $dangerousApps | Where-Object { $_.AppId -eq $appId }
-        $app = $apps | Select-Object -First 1
         $creds = $appCreds[$appId]
 
         # Check if any creds are still valid (not expired)
@@ -952,7 +951,6 @@ function Invoke-ConsentRiskAssessment {
     # User consent setting
     $userConsentAllowed = $defaultPerms.permissionGrantPoliciesAssigned -contains 'microsoft-user-default-legacy'
     $userConsentRestricted = $defaultPerms.permissionGrantPoliciesAssigned -contains 'microsoft-user-default-low'
-    $userConsentDisabled = -not $userConsentAllowed -and -not $userConsentRestricted
 
     if ($userConsentAllowed) {
         $findings += [PSCustomObject]@{
@@ -982,9 +980,7 @@ function Invoke-ConsentRiskAssessment {
         Risk    = if ($canRegister) { 'ⓘ  LOW' } else { '✓  GOOD' }
     }
 
-    # Users can add gallery apps
-    $canAddGallery = $defaultPerms.allowedToCreateSecurityGroups
-    # Actually check if users can read other users
+    # Check if users can read other users
     $canReadOthers = $defaultPerms.allowedToReadOtherUsers
     $findings += [PSCustomObject]@{
         Setting = 'Users can read other users'
@@ -1089,7 +1085,6 @@ function Invoke-CredentialHygieneAudit {
         $certCount = ($creds | Where-Object { $_.Type -eq 'Certificate' } | Measure-Object).Count
         $fedCount = ($creds | Where-Object { $_.Type -eq 'Federated' } | Measure-Object).Count
         $expiredCount = ($creds | Where-Object { $_.Expired } | Measure-Object).Count
-        $totalActive = $creds.Count - $expiredCount
 
         # Determine risk
         $riskLevel = '✓  GOOD'
@@ -1246,7 +1241,7 @@ Write-Host "╚═════════════════════�
 Write-Host ""
 
 # Load configuration
-Load-Config
+Initialize-Config
 
 # Verify required modules
 $requiredModules = @(
