@@ -43,7 +43,7 @@
     The database is refreshed daily and cached locally for 24 hours.
 
 .LINK
-    https://github.com/yourusername/privilidged-app-path
+    https://github.com/nicolasblank/privileged-app-path-auditor
 #>
 
 [CmdletBinding()]
