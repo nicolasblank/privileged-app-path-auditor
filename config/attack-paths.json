@@ -1,7 +1,7 @@
 {
   "$schema": "./schema/attack-paths.schema.json",
   "description": "Attack path definitions and remediation guidance. Each path describes how an unprivileged user can escalate to Global Administrator-equivalent access through Entra ID misconfigurations.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "lastUpdated": "2026-03-15",
   "paths": [
     {

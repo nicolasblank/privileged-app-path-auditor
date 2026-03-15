@@ -1,7 +1,7 @@
 {
   "$schema": "./schema/audit-config.schema.json",
   "description": "Runtime configuration for the Privileged App Path Auditor. These settings control thresholds, exclusions, and behavior. Override values here to customize for your environment.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "lastUpdated": "2026-03-15",
   "stalePrivilege": {
     "inactiveDays": 90,
@@ -11,7 +11,7 @@
     "excludeDisabledApps": false,
     "excludeFirstPartyMicrosoftApps": true,
     "excludeAppIds": [],
-    "description": "Filter settings. excludeFirstPartyMicrosoftApps skips apps owned by Microsoft (publisher ID f8cdef31-a31e-4b4a-93e4-5f571e91255a) to focus on tenant-owned apps."
+    "description": "Filter settings. excludeFirstPartyMicrosoftApps uses the merill/microsoft-info database (4000+ known app IDs, refreshed daily) plus appOwnerOrganizationId to identify and skip Microsoft first-party apps."
   },
   "consentRisk": {
     "flagUserConsentedApps": true,

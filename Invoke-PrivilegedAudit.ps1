@@ -36,7 +36,11 @@
     .\Invoke-PrivilegedAudit.ps1 -Mode StalePrivilege -InactiveDays 60
 
 .NOTES
-    Version: 0.1.0
+    Version: 0.2.0
+
+    This project uses the Microsoft first-party app name database from
+    merill/microsoft-info (https://github.com/merill/microsoft-info) — MIT licensed.
+    The database is refreshed daily and cached locally for 24 hours.
 
 .LINK
     https://github.com/yourusername/privilidged-app-path
@@ -54,7 +58,7 @@ param(
     [string]$ConfigPath = (Join-Path $PSScriptRoot 'config')
 )
 
-$script:Version = '0.1.0'
+$script:Version = '0.2.0'
 
 # Note: StrictMode is intentionally not set. The Microsoft Graph SDK returns\n# hashtables/OrderedDictionaries whose properties are not compatible with\n# StrictMode Version 2+ (.Count, property existence checks fail).
 $ErrorActionPreference = 'Stop'
@@ -206,6 +210,53 @@ function Initialize-Config {
     if ($InactiveDays -gt 0) {
         $script:AuditConfig.stalePrivilege.inactiveDays = $InactiveDays
     }
+
+    # Load Microsoft first-party app lookup (auto-downloads with 24h cache)
+    $script:MicrosoftAppIds = Update-MicrosoftAppsLookup
+}
+
+function Update-MicrosoftAppsLookup {
+    <#
+    .SYNOPSIS
+        Downloads and caches the Microsoft first-party app ID list from merill/microsoft-info.
+        Returns a HashSet of known Microsoft app IDs for fast lookup.
+    #>
+    $cacheFile = Join-Path $ConfigPath 'MicrosoftApps.json'
+    $sourceUrl = 'https://raw.githubusercontent.com/merill/microsoft-info/main/_info/MicrosoftApps.json'
+    $maxAgeHours = 24
+
+    $needsDownload = $true
+    if (Test-Path $cacheFile) {
+        $fileAge = (Get-Date) - (Get-Item $cacheFile).LastWriteTime
+        if ($fileAge.TotalHours -lt $maxAgeHours) {
+            $needsDownload = $false
+        }
+    }
+
+    if ($needsDownload) {
+        try {
+            Write-Verbose "Downloading Microsoft first-party app list from merill/microsoft-info..."
+            $response = Invoke-RestMethod -Uri $sourceUrl -Method Get -ErrorAction Stop
+            $response | ConvertTo-Json -Depth 5 | Set-Content -Path $cacheFile -Encoding UTF8
+            Write-Verbose "Cached $(($response | Measure-Object).Count) Microsoft app IDs to $cacheFile"
+        } catch {
+            Write-Verbose "Could not download Microsoft app list: $($_.Exception.Message). Using cached/fallback."
+        }
+    }
+
+    # Build a HashSet of known Microsoft app IDs
+    $appIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if (Test-Path $cacheFile) {
+        $apps = Get-Content $cacheFile -Raw | ConvertFrom-Json
+        foreach ($app in $apps) {
+            [void]$appIds.Add($app.AppId)
+        }
+        Write-Verbose "Loaded $($appIds.Count) Microsoft first-party app IDs from cache"
+    } else {
+        Write-Verbose "No Microsoft app list available — falling back to appOwnerOrganizationId filter only"
+    }
+
+    return $appIds
 }
 
 #endregion
@@ -320,9 +371,16 @@ function Get-ServicePrincipalsWithAppRoles {
     $sps = Get-AllGraphPages -Uri 'https://graph.microsoft.com/v1.0/servicePrincipals?$select=id,appId,displayName,appOwnerOrganizationId,servicePrincipalType,accountEnabled&$top=999'
 
     # Filter first-party Microsoft apps if configured
-    $microsoftPublisherId = 'f8cdef31-a31e-4b4a-93e4-5f571e91255a'
+    # Uses the merill/microsoft-info lookup (4000+ known app IDs) with fallback to appOwnerOrganizationId
     if ($script:AuditConfig.filters.excludeFirstPartyMicrosoftApps) {
-        $sps = @($sps | Where-Object { $_.appOwnerOrganizationId -ne $microsoftPublisherId })
+        $microsoftOwnerIds = @(
+            'f8cdef31-a31e-4b4a-93e4-5f571e91255a'  # Microsoft Services
+            '72f988bf-86f1-41af-91ab-2d7cd011db47'  # Microsoft Corp
+            'cdc5aeea-15c5-4db6-b079-fcadd2505dc2'  # Microsoft (additional)
+        )
+        $sps = @($sps | Where-Object {
+            -not ($script:MicrosoftAppIds.Contains($_.appId) -or $_.appOwnerOrganizationId -in $microsoftOwnerIds)
+        })
     }
     if (@($script:AuditConfig.filters.excludeAppIds).Count -gt 0) {
         $sps = @($sps | Where-Object { $_.appId -notin $script:AuditConfig.filters.excludeAppIds })

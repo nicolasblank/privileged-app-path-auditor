@@ -1,6 +1,6 @@
 # Privileged App Path Auditor
 
-> **Version 0.1.0**
+> **Version 0.2.0**
 
 A PowerShell tool that identifies privilege escalation paths through Entra ID app registrations, maps shadow admin relationships, and audits privileged role membership — all in a single script with zero cost and no dependencies beyond the Microsoft Graph PowerShell SDK.
 
@@ -462,6 +462,10 @@ This project is intentionally licensed under GPL-3.0 rather than a permissive li
 - Security tooling for identity governance should be **accessible to every organization**, not just those with enterprise budgets
 
 If you're a vendor and want to integrate this into a commercial product, reach out to discuss licensing.
+
+## Acknowledgements
+
+- **[merill/microsoft-info](https://github.com/merill/microsoft-info)** (MIT) — Provides the daily-updated database of 4,000+ Microsoft first-party application IDs used to filter out Microsoft-owned apps. The list is auto-downloaded and cached locally for 24 hours.
 
 ## References
 

@@ -1,7 +1,7 @@
 {
   "$schema": "./schema/dangerous-permissions.schema.json",
   "description": "Application permissions that grant Global Administrator equivalence. These permissions allow an app to escalate privileges, assign roles, or modify any directory object — effectively equivalent to Global Administrator.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "lastUpdated": "2026-03-15",
   "permissions": [
     {
