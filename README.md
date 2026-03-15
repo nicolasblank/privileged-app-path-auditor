@@ -112,6 +112,7 @@ One CSV per mode is created in the export directory:
 | `StalePrivilege.csv` | StalePrivilege |
 | `ConsentRisk.csv` | ConsentRisk |
 | `CredentialHygiene.csv` | CredentialHygiene |
+| `FullAuditSummary.csv` | Full (overall results, risk score, top actions) |
 
 ### Adjusting Stale Threshold
 
