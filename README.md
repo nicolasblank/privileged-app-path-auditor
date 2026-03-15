@@ -2,15 +2,33 @@
 
 > **Version 0.3.0**
 
-A PowerShell tool that identifies privilege escalation paths through Entra ID app registrations, maps shadow admin relationships, and audits privileged role membership — all in a single script with zero cost and no dependencies beyond the Microsoft Graph PowerShell SDK.
+A PowerShell tool that maps privilege escalation attack paths through Entra ID application ownership. If a regular user owns an app registration that has `RoleManagement.ReadWrite.Directory`, `AppRoleAssignment.ReadWrite.All`, or another Global Admin-equivalent permission, that user can add a secret to the app, authenticate as it, and **silently become a Global Administrator** — no alerts, no approval, no MFA. This tool finds every one of those paths in your tenant.
+
+It also detects shadow admins, stale high-privilege apps, credential hygiene issues, and consent policy weaknesses — all in a single script with zero cost and no dependencies beyond the Microsoft Graph PowerShell SDK.
 
 ## Why This Exists
 
-Application identities are one of the largest and least governed attack surfaces in Microsoft Entra ID. Existing free tools either list permissions without context or require expensive licenses (E5, P2) to surface risk. None of them answer the critical question:
+Application identities are one of the largest and least governed attack surfaces in Microsoft Entra ID. A typical enterprise tenant has hundreds of app registrations, many with powerful permissions granted during initial setup and never reviewed. The problem isn't the permissions themselves — it's **who can use them**.
+
+### The Attack Path
+
+In Entra ID, any user listed as an **owner** of an app registration can:
+
+1. Add a new client secret or certificate to the app
+2. Use that credential to authenticate as the app's service principal
+3. Inherit every application permission the app has been granted
+
+If the app holds `RoleManagement.ReadWrite.Directory`, the user can now assign themselves — or anyone — the Global Administrator role. If it holds `AppRoleAssignment.ReadWrite.All`, the user can grant the app any permission, including the ones it didn't originally have. The entire chain requires no admin privileges, generates no approval workflow, and (without Conditional Access for workload identities) triggers no MFA challenge.
+
+This is not a theoretical risk. It is a documented attack technique that works in every Entra ID tenant where app ownership and app permissions are not actively governed.
+
+### What's Missing Today
+
+Existing free tools either list permissions without context or require expensive licenses (E5, P2) to surface risk. None of them answer the critical question:
 
 > **"Can a regular user in my tenant escalate to Global Administrator through an app they own?"**
 
-This tool answers that question — and several others — by mapping the actual attack paths, not just listing permissions.
+This tool answers that question — and several others — by mapping the actual end-to-end attack paths, not just listing permissions. It cross-references app owners, app permissions, service principal role assignments, sign-in activity, and credential metadata to produce actionable findings with direct Entra portal links for immediate investigation.
 
 ## What It Finds
 
