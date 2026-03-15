@@ -403,9 +403,25 @@ function Get-ServicePrincipalsWithAppRoles {
     Write-Host "    Home tenant:              $($homeTenantSPs.Count)" -ForegroundColor Gray
     Write-Host "    Third-party (cross-tenant):$($crossTenantSPs.Count)" -ForegroundColor Gray
     if ($unknownOwnerSPs.Count -gt 0) {
-        Write-Host "    Unknown owner:            $($unknownOwnerSPs.Count)" -ForegroundColor DarkGray
+        Write-Host "    Unknown owner:            $($unknownOwnerSPs.Count)" -ForegroundColor DarkYellow
+        Write-Host "    ⚠ Unknown owner apps require manual investigation — see CSV export" -ForegroundColor DarkYellow
     }
     Write-Host "" -ForegroundColor Gray
+
+    # Export unknown owner apps for investigation
+    if ($unknownOwnerSPs.Count -gt 0) {
+        $unknownExport = @($unknownOwnerSPs | ForEach-Object {
+            [PSCustomObject]@{
+                DisplayName        = $_.displayName
+                AppId              = $_.appId
+                ObjectId           = $_.id
+                Type               = $_.servicePrincipalType
+                Enabled            = $_.accountEnabled
+                EntraPortalUrl     = "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/$($_.id)/appId/$($_.appId)"
+            }
+        })
+        Export-AuditCsv -Name 'UnknownOwnerApps' -Data $unknownExport
+    }
 
     # Export SP classification summary
     $summaryData = @(
