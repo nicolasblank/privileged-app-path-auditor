@@ -158,7 +158,7 @@ Finds apps with permissions that grant Global Admin equivalence.
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  PERMISSION AUDIT — Apps with Global Admin-Equivalent Permissions          ║
+║  PERMISSION AUDIT -- Apps with Global Admin-Equivalent Permissions           ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 Found 4 app(s) with dangerous permissions:
@@ -182,7 +182,7 @@ Lists users in privileged roles and those not in any privileged role.
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  ROLE AUDIT — Privileged Role Membership                                   ║
+║  ROLE AUDIT -- Privileged Role Membership                                    ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 USERS IN PRIVILEGED ROLES (7 users):
@@ -214,7 +214,7 @@ Maps end-to-end privilege escalation paths through app ownership.
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  ATTACK PATH ANALYSIS — User → App Owner → Privilege Escalation            ║
+║  ATTACK PATH ANALYSIS -- User -> App Owner -> Privilege Escalation           ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 Found 2 attack path(s):
@@ -224,14 +224,14 @@ Found 2 attack path(s):
 ───────────────────────────────────────────────────────────────────────────────
 
   ┌─────────────────────────────────────────────────────────────────────────┐
-  │  john.doe@contoso.com                                                  │
-  │  Role: None (regular user)                                             │
-  │                          ↓ owns                                        │
-  │  App: "Legacy Migration Tool" (a1b2c3d4-e5f6-7890-abcd-ef1234567890)  │
-  │  Permission: RoleManagement.ReadWrite.Directory (Application)          │
-  │                          ↓ can exploit                                 │
-  │  Action: Add secret → authenticate as app → assign any role            │
-  │  Result: GLOBAL ADMIN EQUIVALENT ACCESS                                │
+  │  john.doe@contoso.com
+  │  Role: None (regular user)
+  │                          ↓ owns
+  │  App: "Legacy Migration Tool" (a1b2c3d4-e5f6-7890-abcd-ef1234567890)
+  │  Permission: RoleManagement.ReadWrite.Directory (Application)
+  │                          ↓ can exploit
+  │  Action: Add secret → authenticate as app → assign any role
+  │  Result: GLOBAL ADMIN EQUIVALENT ACCESS
   └─────────────────────────────────────────────────────────────────────────┘
 
   Remediation:
@@ -244,14 +244,14 @@ Found 2 attack path(s):
 ───────────────────────────────────────────────────────────────────────────────
 
   ┌─────────────────────────────────────────────────────────────────────────┐
-  │  jane.smith@contoso.com                                                │
-  │  Role: None (regular user)                                             │
-  │                          ↓ owns                                        │
-  │  App: "HR Sync Service" (b2c3d4e5-f6a7-8901-bcde-f12345678901)        │
-  │  Permission: AppRoleAssignment.ReadWrite.All (Application)             │
-  │                          ↓ can exploit                                 │
-  │  Action: Add secret → authenticate as app → grant itself any permission│
-  │  Result: GLOBAL ADMIN EQUIVALENT ACCESS                                │
+  │  jane.smith@contoso.com
+  │  Role: None (regular user)
+  │                          ↓ owns
+  │  App: "HR Sync Service" (b2c3d4e5-f6a7-8901-bcde-f12345678901)
+  │  Permission: AppRoleAssignment.ReadWrite.All (Application)
+  │                          ↓ can exploit
+  │  Action: Add secret → authenticate as app → grant itself any permission
+  │  Result: GLOBAL ADMIN EQUIVALENT ACCESS
   └─────────────────────────────────────────────────────────────────────────┘
 
   Remediation:
@@ -268,7 +268,7 @@ Finds users who own service principals that hold privileged directory roles.
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  SHADOW ADMIN DETECTION — SP Owners with Indirect Privilege                ║
+║  SHADOW ADMIN DETECTION -- SP Owners with Indirect Privilege                 ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 Found 1 shadow admin path(s):
@@ -288,7 +288,7 @@ Flags high-privilege apps that haven't signed in recently but still have valid c
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  STALE PRIVILEGE — Dormant High-Privilege Apps with Valid Credentials       ║
+║  STALE PRIVILEGE -- Dormant High-Privilege Apps with Valid Credentials       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 Found 3 stale high-privilege app(s):
@@ -316,7 +316,7 @@ Assesses the tenant's consent policy configuration.
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  CONSENT RISK — Tenant Consent Policy Assessment                           ║
+║  CONSENT RISK -- Tenant Consent Policy Assessment                            ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 Setting                                    Value                    Risk
@@ -350,7 +350,7 @@ Evaluates credential practices for high-privilege apps.
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  CREDENTIAL HYGIENE — Credential Risk for High-Privilege Apps              ║
+║  CREDENTIAL HYGIENE -- Credential Risk for High-Privilege Apps               ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 Found 4 high-privilege apps. Credential breakdown:
@@ -383,7 +383,7 @@ Runs all modes sequentially and produces a summary:
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  FULL AUDIT SUMMARY                                                        ║
+║  FULL AUDIT SUMMARY                                                          ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
   Permission Audit:      4 apps with GA-equivalent permissions

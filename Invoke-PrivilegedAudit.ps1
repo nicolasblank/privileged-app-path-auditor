@@ -269,7 +269,7 @@ function Write-Banner {
     $line = '═' * $width
     Write-Host ""
     Write-Host "╔$line╗" -ForegroundColor Cyan
-    Write-Host "║  $($Title.PadRight($width - 3))║" -ForegroundColor Cyan
+    Write-Host "║  $($Title.PadRight($width - 2))║" -ForegroundColor Cyan
     Write-Host "╚$line╝" -ForegroundColor Cyan
     Write-Host ""
 }
@@ -720,7 +720,7 @@ function Get-AllUsers {
 #region ── Mode: PermissionAudit ──────────────────────────────────────────────
 
 function Invoke-PermissionAudit {
-    Write-Banner "PERMISSION AUDIT — Apps with Global Admin-Equivalent Permissions"
+    Write-Banner "PERMISSION AUDIT -- Apps with Global Admin-Equivalent Permissions"
 
     $dangerousApps = Get-ServicePrincipalsWithAppRoles
 
@@ -751,7 +751,7 @@ function Invoke-PermissionAudit {
 #region ── Mode: RoleAudit ────────────────────────────────────────────────────
 
 function Invoke-RoleAudit {
-    Write-Banner "ROLE AUDIT — Privileged Role Membership"
+    Write-Banner "ROLE AUDIT -- Privileged Role Membership"
 
     $roleAssignments = Get-PrivilegedRoleAssignments
     $allUsers = Get-AllUsers
@@ -836,7 +836,7 @@ function Invoke-RoleAudit {
 #region ── Mode: AttackPath ───────────────────────────────────────────────────
 
 function Invoke-AttackPathAnalysis {
-    Write-Banner "ATTACK PATH ANALYSIS — User → App Owner → Privilege Escalation"
+    Write-Banner "ATTACK PATH ANALYSIS -- User -> App Owner -> Privilege Escalation"
 
     $dangerousApps = Get-ServicePrincipalsWithAppRoles
     if ($dangerousApps.Count -eq 0) {
@@ -922,7 +922,7 @@ function Invoke-AttackPathAnalysis {
 #region ── Mode: ShadowAdmins ─────────────────────────────────────────────────
 
 function Invoke-ShadowAdminDetection {
-    Write-Banner "SHADOW ADMIN DETECTION — SP Owners with Indirect Privilege"
+    Write-Banner "SHADOW ADMIN DETECTION -- SP Owners with Indirect Privilege"
 
     $roleAssignments = Get-PrivilegedRoleAssignments
     $spRoleAssignments = $roleAssignments | Where-Object { $_.PrincipalType -eq '#microsoft.graph.servicePrincipal' }
@@ -989,7 +989,7 @@ function Invoke-ShadowAdminDetection {
 #region ── Mode: StalePrivilege ───────────────────────────────────────────────
 
 function Invoke-StalePrivilegeDetection {
-    Write-Banner "STALE PRIVILEGE — Dormant High-Privilege Apps with Valid Credentials"
+    Write-Banner "STALE PRIVILEGE -- Dormant High-Privilege Apps with Valid Credentials"
 
     $dangerousApps = Get-ServicePrincipalsWithAppRoles
     if ($dangerousApps.Count -eq 0) {
@@ -1085,7 +1085,7 @@ function Invoke-StalePrivilegeDetection {
 #region ── Mode: ConsentRisk ──────────────────────────────────────────────────
 
 function Invoke-ConsentRiskAssessment {
-    Write-Banner "CONSENT RISK — Tenant Consent Policy Assessment"
+    Write-Banner "CONSENT RISK -- Tenant Consent Policy Assessment"
 
     $policy = Get-TenantConsentPolicy
     if (-not $policy) {
@@ -1200,7 +1200,7 @@ function Invoke-ConsentRiskAssessment {
 #region ── Mode: CredentialHygiene ─────────────────────────────────────────────
 
 function Invoke-CredentialHygieneAudit {
-    Write-Banner "CREDENTIAL HYGIENE — Credential Risk for High-Privilege Apps"
+    Write-Banner "CREDENTIAL HYGIENE -- Credential Risk for High-Privilege Apps"
 
     $dangerousApps = Get-ServicePrincipalsWithAppRoles
     if ($dangerousApps.Count -eq 0) {
@@ -1405,8 +1405,8 @@ function Invoke-FullAudit {
 
 Write-Host ""
 Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor DarkCyan
-Write-Host "║  Privileged App Path Auditor                                               ║" -ForegroundColor DarkCyan
-Write-Host "║  Identifies privilege escalation paths through Entra ID applications        ║" -ForegroundColor DarkCyan
+Write-Host "║  Privileged App Path Auditor                                                 ║" -ForegroundColor DarkCyan
+Write-Host "║  Identifies privilege escalation paths through Entra ID applications         ║" -ForegroundColor DarkCyan
 Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor DarkCyan
 Write-Host ""
 
