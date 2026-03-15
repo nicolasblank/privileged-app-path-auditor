@@ -106,6 +106,7 @@ One CSV per mode is created in the export directory:
 | File | Source Mode |
 |---|---|
 | `Summary.csv` | SP classification (all modes that scan SPs) |
+| `UnknownOwnerApps.csv` | SPs with no owner org — includes Entra portal URLs |
 | `PermissionAudit.csv` | PermissionAudit |
 | `RoleAudit.csv` | RoleAudit |
 | `AttackPaths.csv` | AttackPath |
@@ -461,7 +462,19 @@ Source: [Microsoft Entra built-in roles](https://learn.microsoft.com/entra/ident
 | **Microsoft first-party** | Apps owned by Microsoft — identified using the [merill/microsoft-info](https://github.com/merill/microsoft-info) database (4,000+ known app IDs, refreshed daily) and `appOwnerOrganizationId`. All are cross-tenant by nature but are a known quantity. |
 | **Home tenant** | Apps your organization registered in Entra ID |
 | **Third-party (cross-tenant)** | Apps from non-Microsoft external vendors (SaaS products you've consented to). These are typically the highest-risk category — they originate from another organization's tenant and have been granted permissions in yours. |
-| **Unknown owner** | No `appOwnerOrganizationId` and not in the Microsoft lookup. May be legacy apps or apps with incomplete metadata. |
+| **Unknown owner** | No `appOwnerOrganizationId` and not in the Microsoft lookup. May be legacy apps, managed identities with incomplete metadata, or apps from deleted tenants. These are exported to `UnknownOwnerApps.csv` with direct Entra portal links for investigation. |
+
+### Investigating Unknown Owner Apps
+
+When the audit reports unknown owner apps, each one is exported to `UnknownOwnerApps.csv` with a clickable `EntraPortalUrl` column that opens the app directly in the Entra admin center. For each app:
+
+1. **Open the Entra portal link** — check the Overview blade for publisher, sign-in activity, and assigned users
+2. **Check Owners** — if no owners are listed, the app may be orphaned. Assign an owner or flag for removal
+3. **Check Permissions** — review the API permissions tab. Unknown-origin apps with `Directory.ReadWrite.All` or `RoleManagement.ReadWrite.Directory` are high priority
+4. **Check Sign-in logs** — if the app has never signed in and has no users assigned, consider disabling it
+5. **Decide**: keep (assign an owner), disable (`Update-MgServicePrincipal -AccountEnabled:$false`), or delete
+
+Unknown owner apps are **not** filtered from scanning — they are checked for dangerous permissions alongside home tenant and third-party apps.
 
 4. Cross-references the data to map relationships (user → owns app → app has permission → escalation path)
 5. Outputs findings to the console with actionable remediation guidance
