@@ -1,7 +1,7 @@
 {
   "$schema": "./schema/audit-config.schema.json",
   "description": "Runtime configuration for the Privileged App Path Auditor. These settings control thresholds, exclusions, and behavior. Override values here to customize for your environment.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "lastUpdated": "2026-03-15",
   "stalePrivilege": {
     "inactiveDays": 90,

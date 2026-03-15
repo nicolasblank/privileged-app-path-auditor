@@ -1,6 +1,6 @@
 # Privileged App Path Auditor
 
-> **Version 0.2.0**
+> **Version 0.3.0**
 
 A PowerShell tool that identifies privilege escalation paths through Entra ID app registrations, maps shadow admin relationships, and audits privileged role membership — all in a single script with zero cost and no dependencies beyond the Microsoft Graph PowerShell SDK.
 
