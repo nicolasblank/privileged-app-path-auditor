@@ -200,6 +200,197 @@ When the audit reports unknown owner apps, each one is exported to `UnknownOwner
 
 Unknown owner apps are **not** filtered from scanning — they are checked for dangerous permissions alongside home tenant and third-party apps.
 
+### Investigating Attack Paths
+
+Attack path findings are the highest-severity output of the tool. Each row in `AttackPaths.csv` represents a confirmed, exploitable privilege escalation chain: a non-admin user who owns an app that has a Global Admin-equivalent permission.
+
+#### Understanding the Finding
+
+Every attack path has three components:
+
+| Component | CSV Column | What It Means |
+|---|---|---|
+| **The user** | `UserUPN`, `UserDisplayName` | A regular user with no privileged Entra ID roles. They are an **owner** of the app registration, which means they can modify its credentials. |
+| **The app** | `AppName`, `AppId` | An app registration whose service principal has been granted a dangerous application permission (e.g. `RoleManagement.ReadWrite.Directory`). |
+| **The escalation** | `Permission`, `Action`, `Result` | What the user can do: add a secret, authenticate as the app, and exploit the permission to reach Global Admin equivalence. |
+
+The `AppEntraUrl` link opens the enterprise application blade; the `UserEntraUrl` link opens the user's profile.
+
+#### Why This Is Critical
+
+The user does not need any admin role to execute this attack. App owners can add credentials to their apps through the Entra portal, the Azure CLI, or the Microsoft Graph API. Once they have a credential, they authenticate as the service principal — inheriting every application permission the app has been granted. If that includes `RoleManagement.ReadWrite.Directory`, they can assign themselves Global Administrator. The entire chain can be completed in under a minute with no approval workflow and no MFA (unless Conditional Access for workload identities is configured).
+
+#### Step-by-Step Investigation
+
+For each row in `AttackPaths.csv`:
+
+1. **Open the app link** (`AppEntraUrl`) — go to the **Owners** tab. Confirm the user listed in the finding is still an owner. If they were removed since the last scan, re-run the audit to verify the path is closed.
+
+2. **Evaluate ownership necessity** — does this user need to be an owner of this app? Common legitimate reasons:
+   - The user is the developer who built and maintains the app
+   - The user is the team lead responsible for the app's lifecycle
+   - The ownership was inherited and never cleaned up (most common)
+
+3. **Check the permission** — go to the **Permissions** tab (API permissions). Look at the specific permission listed in the `Permission` column:
+   - `RoleManagement.ReadWrite.Directory` — can assign any role to any principal
+   - `AppRoleAssignment.ReadWrite.All` — can grant any app permission to any service principal
+   - `Application.ReadWrite.All` — can modify credentials on any app in the tenant
+   - `Directory.ReadWrite.All` — broad write access to all directory objects
+   - `Directory.AccessAsUser.All` — full directory access as the signed-in user (delegated)
+
+4. **Decide on remediation** — there are two ways to break the path, and you should consider both:
+
+   | Option | When to Use | How |
+   |---|---|---|
+   | **Remove the owner** | The user doesn't need ownership. This is the fastest fix. | Entra portal → Enterprise app → Owners → Remove |
+   | **Reduce the permission** | The app doesn't need a GA-equivalent permission. Replace with a least-privilege alternative. | Entra portal → App registration → API permissions → Remove and re-grant with narrower scope |
+   | **Both** | Ideal for maximum risk reduction | Remove the owner **and** reduce the permission |
+
+5. **Apply compensating controls** — if neither removal is feasible (e.g. production app with a legitimate owner):
+   - Enable **Conditional Access for workload identities** on the service principal to require a compliant network or block token issuance outside trusted locations
+   - Configure **app instance lock** to prevent credential changes without admin approval
+   - Set up **alerts** on credential additions via Azure Monitor or Microsoft Sentinel
+
+6. **Verify the fix** — re-run the audit in AttackPath mode:
+   ```powershell
+   .\Invoke-PrivilegedAudit.ps1 -Mode AttackPath
+   ```
+   The path should no longer appear. If it does, check whether another user is also an owner, or whether the permission was re-granted.
+
+#### Bulk Triage
+
+If the audit finds many attack paths, prioritize by permission severity:
+
+1. `RoleManagement.ReadWrite.Directory` — direct Global Admin escalation (fix first)
+2. `AppRoleAssignment.ReadWrite.All` — can self-grant any permission (fix second)
+3. `Application.ReadWrite.All` — can pivot to other apps (fix third)
+4. `Directory.ReadWrite.All` — broad but less direct escalation (fix fourth)
+
+Sort the CSV by `Permission` and work through each group. Use the `AppEntraUrl` links to jump directly to each app.
+
+### Investigating Shadow Admins
+
+Shadow admin findings identify non-admin users who own service principals that hold privileged Entra ID directory roles. Unlike attack paths (which exploit app permissions), shadow admins exploit **role assignments on service principals**.
+
+#### Understanding the Finding
+
+Each row in `ShadowAdmins.csv` represents a user who can:
+
+1. Reset the credentials of a service principal they own
+2. Authenticate as that service principal
+3. Inherit the SP's privileged directory role (e.g. Privileged Role Administrator, Global Administrator)
+
+| CSV Column | What It Means |
+|---|---|
+| `UserUPN` | The non-admin user who owns the SP |
+| `SPDisplayName`, `SPId` | The service principal that holds a privileged role |
+| `SPRole` | The directory role assigned to the SP |
+| `Risk` | The full attack chain description |
+
+#### Step-by-Step Investigation
+
+1. **Open the SP link** (`SPEntraUrl`) — go to **Owners** and confirm the user is listed
+
+2. **Check the SP's role** — go to **Assigned roles** (or check `SPRole` in the CSV). Is this role actually required for the SP's function? Common over-assignments:
+   - SP has Global Administrator but only needs Application Administrator
+   - SP has Privileged Role Administrator but only needs User Administrator
+   - SP has a role from initial setup that was never scoped down
+
+3. **Check the user link** (`UserEntraUrl`) — go to **Owned applications** to see everything this user can control. A user who owns multiple role-bearing SPs is a higher priority.
+
+4. **Remediate**:
+
+   | Option | When to Use |
+   |---|---|
+   | **Remove user as SP owner** | The user doesn't need to manage this SP |
+   | **Remove the SP's role assignment** | The SP doesn't need a privileged role |
+   | **Replace permanent with PIM-eligible** | The SP needs the role occasionally — use just-in-time activation instead |
+   | **Scope the role** | Use an Administrative Unit to limit the role's blast radius |
+
+5. **Verify** — re-run: `.\Invoke-PrivilegedAudit.ps1 -Mode ShadowAdmins`
+
+### Investigating Stale Privileges
+
+Stale privilege findings flag high-privilege apps that have valid credentials but no recent sign-in activity. These are dormant apps that could be exploited if an attacker obtains their credentials — they are already pre-authorized with dangerous permissions.
+
+#### Understanding the Finding
+
+Each row in `StalePrivilege.csv` represents an app that has all three risk factors simultaneously:
+
+| CSV Column | What It Means |
+|---|---|
+| `AppName`, `AppId` | The dormant app |
+| `Permission` | The dangerous permission the app holds |
+| `LastSignIn` | How long since the app last authenticated (or "Never") |
+| `CredentialType` | Whether the app uses a Secret or Certificate |
+| `CredentialExpires` | When the valid credential expires |
+| `ValidCredCount` | Number of non-expired credentials (multiple credentials increase risk) |
+
+An app that has never signed in, holds `RoleManagement.ReadWrite.Directory`, and has a valid secret is a critical finding — it is a fully loaded weapon that no one is using.
+
+#### Step-by-Step Investigation
+
+1. **Open the app link** (`EntraPortalUrl`) — check the **Overview** for the app's description, publisher, and assigned users
+
+2. **Determine if the app is still needed**:
+   - Check **Sign-in logs** — is there any activity at all, or was it active years ago?
+   - Check **Users and groups** — are users or groups assigned to this app?
+   - Ask the app's owner (if one exists) — is this app part of an active workflow, seasonal process, or disaster recovery plan?
+
+3. **Check for credential exposure**:
+   - Go to **Certificates & secrets** — how many credentials exist? When were they created?
+   - Multiple secrets created at different times may indicate credential sprawl or a compromised rotation process
+   - A secret created recently on an otherwise dormant app is a red flag
+
+4. **Remediate based on the situation**:
+
+   | Situation | Action |
+   |---|---|
+   | App is abandoned / no one claims it | Disable the app: `Update-MgServicePrincipal -ServicePrincipalId <id> -AccountEnabled:$false`, then delete after a bake period |
+   | App is needed but the permission is too broad | Remove the dangerous permission and grant a least-privilege alternative |
+   | App is needed and the permission is justified | Rotate credentials, remove extras, configure Conditional Access for workload identities, and set up sign-in monitoring |
+   | App has never signed in | Almost certainly safe to disable — but verify with the owner first |
+
+5. **Don't just revoke the credential** — removing the secret doesn't fix the root cause. The dangerous permission remains, and a new credential can be added. Either remove the permission or disable the app.
+
+6. **Verify** — re-run: `.\Invoke-PrivilegedAudit.ps1 -Mode StalePrivilege`
+
+### Investigating Credential Hygiene Findings
+
+Credential hygiene findings assess **how** high-privilege apps authenticate, not whether they should have the permission (that's PermissionAudit's job). The risk hierarchy is: secrets are the weakest, certificates are better, and federated credentials / managed identities are best.
+
+#### Understanding the Risk Levels
+
+| Risk Level | Meaning |
+|---|---|
+| **CRITICAL** | Multiple credentials including secrets — likely credential sprawl |
+| **HIGH** | Single secret — extractable, can be leaked in logs/config files |
+| **MODERATE** | Certificate only — better, but the permission itself is still dangerous |
+| **GOOD** | Federated or managed identity — best practice |
+| **INFO** | No credentials at all — the app can't authenticate (may be unused) |
+
+#### Step-by-Step Investigation
+
+1. **Open the app link** (`EntraPortalUrl`) — go to **Certificates & secrets**
+
+2. **Assess the credential situation**:
+   - **Multiple credentials** (`CredCount > 1`) — why does this app have more than one? Common causes: failed rotation (old secret not deleted), multiple environments sharing one app registration, or credential compromise where a new secret was added without revoking the old one
+   - **Expired credentials** (`ExpiredCount > 0`) — these should be removed. They can't be used for authentication but they clutter the app and may indicate poor lifecycle management
+   - **Secrets on a high-privilege app** — secrets are strings that can be copied, pasted into emails, committed to source control, or logged in CI/CD output. Unlike certificates, they don't require a private key
+
+3. **Plan the migration**:
+
+   | Current State | Target State | How |
+   |---|---|---|
+   | Secret | Certificate | Generate a certificate, upload the public key to the app registration, update the app's code to use certificate-based auth, then delete the secret |
+   | Secret | Managed Identity | If the app runs on Azure (App Service, Functions, VMs, AKS), switch to a system-assigned or user-assigned managed identity — no credentials to manage at all |
+   | Secret | Federated credential | For GitHub Actions, Kubernetes, or other OIDC-capable platforms, configure workload identity federation |
+   | Multiple secrets | Single certificate | Consolidate to one certificate, update all consumers, delete all secrets |
+
+4. **Remove expired credentials** — even though they can't be used, they add noise. Go to **Certificates & secrets** and delete any with a past expiry date.
+
+5. **Verify** — re-run: `.\Invoke-PrivilegedAudit.ps1 -Mode CredentialHygiene`
+
 ### Adjusting Stale Threshold
 
 ```powershell
