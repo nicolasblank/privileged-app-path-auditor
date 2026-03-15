@@ -1,7 +1,7 @@
 {
   "$schema": "./schema/attack-paths.schema.json",
   "description": "Attack path definitions and remediation guidance. Each path describes how an unprivileged user can escalate to Global Administrator-equivalent access through Entra ID misconfigurations.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "lastUpdated": "2026-03-15",
   "paths": [
     {
@@ -151,6 +151,66 @@
       ],
       "references": [
         "https://learn.microsoft.com/entra/identity/enterprise-apps/certificate-management"
+      ]
+    },
+    {
+      "id": "ROLE_BASED_SP_CONTROL",
+      "name": "Application Admin Controls Privileged Service Principals",
+      "severity": "Critical",
+      "description": "A user with Application Administrator or Cloud Application Administrator can add secrets to ANY service principal in the tenant — including SPs that hold Global Administrator or other privileged directory roles. This is the most common real-world escalation path to Global Admin.",
+      "chain": [
+        "User holds Application Administrator or Cloud Application Administrator role",
+        "Tenant has service principals with privileged directory roles",
+        "User adds a new secret/certificate to the privileged SP",
+        "User authenticates as the SP using the new credential",
+        "User inherits the SP's privileged directory role"
+      ],
+      "detection": {
+        "method": "Cross-reference users with Application Admin/Cloud App Admin roles against SPs holding privileged directory roles",
+        "graphQueries": [
+          "GET /roleManagement/directory/roleAssignments?$expand=principal",
+          "GET /roleManagement/directory/roleDefinitions"
+        ]
+      },
+      "remediation": [
+        "Use PIM with approval workflow for the Application Administrator role",
+        "Limit Application Administrator scope with Administrative Units",
+        "Monitor SP credential changes in Entra audit logs",
+        "Remove permanent Application Administrator assignments where possible"
+      ],
+      "references": [
+        "https://posts.specterops.io/azure-privilege-escalation-via-service-principal-abuse-210ae2be2a5",
+        "https://learn.microsoft.com/entra/identity/role-based-access-control/permissions-reference#application-administrator"
+      ]
+    },
+    {
+      "id": "UNOWNED_PRIVILEGED_APP",
+      "name": "Unowned Application with Dangerous Permissions",
+      "severity": "High",
+      "description": "An application has Global Admin-equivalent permissions but no assigned owners. Without an owner, there is no accountability for credential rotation, access reviews, or lifecycle management. If credentials exist, they may be stale and at risk of exploitation.",
+      "chain": [
+        "Application has GA-equivalent permissions",
+        "No owners assigned to the application",
+        "No accountability for credential rotation",
+        "Credentials may be stale or compromised",
+        "Attacker discovers and uses existing credentials",
+        "Attacker inherits dangerous permissions"
+      ],
+      "detection": {
+        "method": "Find apps with dangerous permissions that have zero owners",
+        "graphQueries": [
+          "GET /applications?$filter=appId eq '{appId}'",
+          "GET /applications/{id}/owners"
+        ]
+      },
+      "remediation": [
+        "Assign a responsible owner to the application",
+        "Review if the application is still needed",
+        "Rotate or remove existing credentials",
+        "Enable app instance property lock to prevent SP-level credential injection"
+      ],
+      "references": [
+        "https://learn.microsoft.com/entra/identity/enterprise-apps/overview-assign-app-owners"
       ]
     }
   ]
