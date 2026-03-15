@@ -105,6 +105,7 @@ One CSV per mode is created in the export directory:
 
 | File | Source Mode |
 |---|---|
+| `Summary.csv` | SP classification (all modes that scan SPs) |
 | `PermissionAudit.csv` | PermissionAudit |
 | `RoleAudit.csv` | RoleAudit |
 | `AttackPaths.csv` | AttackPath |

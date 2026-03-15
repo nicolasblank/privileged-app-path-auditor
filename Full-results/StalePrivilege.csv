@@ -1,0 +1,3 @@
+"AppName","AppId","Permission","LastSignIn","CredentialType","CredentialExpires","ValidCredCount"
+"Microsoft 365 Backup","3ceb89a9-8fca-40e0-a51b-a2b6270a4e14","Directory.ReadWrite.All","Never","Certificate","2120-11-12","1"
+"Synology Active Backup for M365","720c6edb-0a89-491f-9f7b-cc87abde9092","Directory.ReadWrite.All","Never","Certificate","2084-06-09","1"

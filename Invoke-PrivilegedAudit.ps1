@@ -407,6 +407,17 @@ function Get-ServicePrincipalsWithAppRoles {
     }
     Write-Host "" -ForegroundColor Gray
 
+    # Export SP classification summary
+    $summaryData = @(
+        [PSCustomObject]@{ Category = 'Total';                    Count = $totalAll;                Description = 'All service principals in the tenant' }
+        [PSCustomObject]@{ Category = 'Microsoft first-party';    Count = $microsoftSPs.Count;      Description = 'Apps owned by Microsoft (merill/microsoft-info lookup + appOwnerOrganizationId)' }
+        [PSCustomObject]@{ Category = 'Home tenant';              Count = $homeTenantSPs.Count;     Description = 'Apps registered in your organization' }
+        [PSCustomObject]@{ Category = 'Third-party (cross-tenant)'; Count = $crossTenantSPs.Count;  Description = 'Apps from non-Microsoft external vendors' }
+        [PSCustomObject]@{ Category = 'Unknown owner';            Count = $unknownOwnerSPs.Count;   Description = 'No appOwnerOrganizationId and not in Microsoft lookup' }
+        [PSCustomObject]@{ Category = 'Scanned (non-Microsoft)';  Count = $homeTenantSPs.Count + $crossTenantSPs.Count + $unknownOwnerSPs.Count; Description = 'SPs scanned for dangerous permissions' }
+    )
+    Export-AuditCsv -Name 'Summary' -Data $summaryData
+
     # Filter first-party Microsoft apps if configured
     # Uses the merill/microsoft-info lookup (4000+ known app IDs) with fallback to appOwnerOrganizationId
     if ($script:AuditConfig.filters.excludeFirstPartyMicrosoftApps) {
