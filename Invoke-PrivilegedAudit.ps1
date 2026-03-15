@@ -1329,6 +1329,24 @@ function Invoke-FullAudit {
         }
     }
 
+    # Export full audit summary CSV
+    $summaryRows = @(
+        [PSCustomObject]@{ Section = 'PermissionAudit';    Finding = $summary['PermissionAudit'];    Count = $permResults.Count }
+        [PSCustomObject]@{ Section = 'RoleAudit';          Finding = $summary['RoleAudit'];          Count = $roleResults.PrivilegedUsers.Count }
+        [PSCustomObject]@{ Section = 'AttackPaths';        Finding = $summary['AttackPaths'];        Count = $attackResults.Count }
+        [PSCustomObject]@{ Section = 'ShadowAdmins';       Finding = $summary['ShadowAdmins'];       Count = $shadowResults.Count }
+        [PSCustomObject]@{ Section = 'StalePrivilege';     Finding = $summary['StalePrivilege'];     Count = $staleResults.Count }
+        [PSCustomObject]@{ Section = 'ConsentRisk';        Finding = $summary['ConsentRisk'];        Count = $criticalConsent }
+        [PSCustomObject]@{ Section = 'CredentialHygiene';  Finding = $summary['CredentialHygiene'];  Count = $secretApps }
+        [PSCustomObject]@{ Section = 'OverallRisk';        Finding = $overallRisk;                   Count = $riskScore }
+    )
+    $actionNum = 0
+    foreach ($action in ($actions | Select-Object -First 5)) {
+        $actionNum++
+        $summaryRows += [PSCustomObject]@{ Section = "Action$actionNum"; Finding = $action; Count = '' }
+    }
+    Export-AuditCsv -Name 'FullAuditSummary' -Data $summaryRows
+
     if ($ExportPath) {
         Write-Host ""
         Write-Host "  Full results exported to: $ExportPath" -ForegroundColor DarkGreen
