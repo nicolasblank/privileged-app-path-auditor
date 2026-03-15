@@ -53,7 +53,7 @@ The script connects with these delegated scopes:
 ```
 Application.Read.All
 Directory.Read.All
-RoleManagement.Directory.Read.All
+RoleManagement.Read.Directory
 AuditLog.Read.All
 Policy.Read.All
 ```

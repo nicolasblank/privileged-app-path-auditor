@@ -56,7 +56,7 @@ param(
 
 $script:Version = '0.1.0'
 
-Set-StrictMode -Version Latest
+# Note: StrictMode is intentionally not set. The Microsoft Graph SDK returns\n# hashtables/OrderedDictionaries whose properties are not compatible with\n# StrictMode Version 2+ (.Count, property existence checks fail).
 $ErrorActionPreference = 'Stop'
 
 #region ── Configuration Loading ──────────────────────────────────────────────
@@ -270,7 +270,7 @@ function Connect-GraphIfNeeded {
     $requiredScopes = @(
         'Application.Read.All'
         'Directory.Read.All'
-        'RoleManagement.Directory.Read.All'
+        'RoleManagement.Read.Directory'
         'AuditLog.Read.All'
         'Policy.Read.All'
     )
@@ -301,14 +301,18 @@ function Connect-GraphIfNeeded {
 # Paginate through a Graph endpoint
 function Get-AllGraphPages {
     param([string]$Uri)
-    $results = @()
+    $results = [System.Collections.Generic.List[object]]::new()
     $response = Invoke-MgGraphRequest -Method GET -Uri $Uri
-    if ($response.value) { $results += $response.value }
-    while ($response.'@odata.nextLink') {
-        $response = Invoke-MgGraphRequest -Method GET -Uri $response.'@odata.nextLink'
-        if ($response.value) { $results += $response.value }
+    if ($response.ContainsKey('value')) {
+        foreach ($item in $response.value) { $results.Add($item) }
     }
-    return $results
+    while ($response.ContainsKey('@odata.nextLink')) {
+        $response = Invoke-MgGraphRequest -Method GET -Uri $response.'@odata.nextLink'
+        if ($response.ContainsKey('value')) {
+            foreach ($item in $response.value) { $results.Add($item) }
+        }
+    }
+    return @($results)
 }
 
 function Get-ServicePrincipalsWithAppRoles {
@@ -318,14 +322,14 @@ function Get-ServicePrincipalsWithAppRoles {
     # Filter first-party Microsoft apps if configured
     $microsoftPublisherId = 'f8cdef31-a31e-4b4a-93e4-5f571e91255a'
     if ($script:AuditConfig.filters.excludeFirstPartyMicrosoftApps) {
-        $sps = $sps | Where-Object { $_.appOwnerOrganizationId -ne $microsoftPublisherId }
+        $sps = @($sps | Where-Object { $_.appOwnerOrganizationId -ne $microsoftPublisherId })
     }
-    if ($script:AuditConfig.filters.excludeAppIds.Count -gt 0) {
-        $sps = $sps | Where-Object { $_.appId -notin $script:AuditConfig.filters.excludeAppIds }
+    if (@($script:AuditConfig.filters.excludeAppIds).Count -gt 0) {
+        $sps = @($sps | Where-Object { $_.appId -notin $script:AuditConfig.filters.excludeAppIds })
     }
 
     # Get app role assignments for each SP (these are the application permissions granted)
-    $dangerousNames = $script:DangerousPermissions | ForEach-Object { $_.name }
+    $dangerousNames = @($script:DangerousPermissions | ForEach-Object { $_.name })
     $results = @()
     $total = ($sps | Measure-Object).Count
     $i = 0
@@ -333,7 +337,7 @@ function Get-ServicePrincipalsWithAppRoles {
         $i++
         if ($i % 100 -eq 0) { Write-Host "    Processing SP $i of $total..." -ForegroundColor DarkGray }
         try {
-            $assignments = Get-AllGraphPages -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$($sp.id)/appRoleAssignments?`$select=id,appRoleId,resourceDisplayName"
+            $assignments = Get-AllGraphPages -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$($sp.id)/appRoleAssignments?`$select=id,appRoleId,resourceId,resourceDisplayName"
         } catch {
             continue
         }
@@ -377,7 +381,7 @@ function Get-ServicePrincipalsWithAppRoles {
     }
 
     # Also check delegated permissions (oauth2PermissionGrants) for Directory.AccessAsUser.All
-    $delegatedPerms = $script:DangerousPermissions | Where-Object { $_.type -eq 'Delegated' }
+    $delegatedPerms = @($script:DangerousPermissions | Where-Object { $_.type -eq 'Delegated' })
     if ($delegatedPerms.Count -gt 0) {
         Write-Host "  Checking delegated permission grants..." -ForegroundColor Gray
         $grants = Get-AllGraphPages -Uri 'https://graph.microsoft.com/v1.0/oauth2PermissionGrants?$top=999'
