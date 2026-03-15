@@ -6,6 +6,12 @@ A PowerShell tool that maps privilege escalation attack paths through Entra ID a
 
 It also detects shadow admins, stale high-privilege apps, credential hygiene issues, and consent policy weaknesses — all in a single script with zero cost and no dependencies beyond the Microsoft Graph PowerShell SDK.
 
+> **No files are created unless you ask for them.** By default the script prints findings to the console only — no CSVs, no exports, no files written anywhere. To generate CSV reports, explicitly pass the `-ExportPath` parameter:
+> ```powershell
+> .\Invoke-PrivilegedAudit.ps1 -Mode Full -ExportPath ./audit-results
+> ```
+> Without `-ExportPath`, nothing is written to disk.
+
 ## Why This Exists
 
 Application identities are one of the largest and least governed attack surfaces in Microsoft Entra ID. A typical enterprise tenant has hundreds of app registrations, many with powerful permissions granted during initial setup and never reviewed. The problem isn't the permissions themselves — it's **who can use them**.
