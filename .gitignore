@@ -28,3 +28,5 @@ config/local-*.json
 config/MicrosoftApps.json
 Full-results/
 tmp/
+node_modules/
+dist/
