@@ -114,6 +114,10 @@ One CSV per mode is created in the export directory:
 | `CredentialHygiene.csv` | CredentialHygiene |
 | `FullAuditSummary.csv` | Full (overall results, risk score, top actions) |
 
+`Summary.csv` contains the service principal classification breakdown (total, Microsoft first-party, home tenant, third-party, unknown owner, and how many were scanned). It is written by any mode that queries service principals.
+
+`FullAuditSummary.csv` is only produced by `Full` mode. It contains one row per mode with the finding count, the overall risk level and score, and the top remediation actions — useful for dashboards, trend tracking, or forwarding to a SIEM.
+
 ### Adjusting Stale Threshold
 
 ```powershell
