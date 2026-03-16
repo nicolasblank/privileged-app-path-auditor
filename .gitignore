@@ -28,5 +28,8 @@ config/local-*.json
 config/MicrosoftApps.json
 Full-results/
 tmp/
+
+# Admin UI (local dev only)
+admin-ui/
 node_modules/
 dist/

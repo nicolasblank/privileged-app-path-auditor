@@ -765,12 +765,14 @@ Source: [Microsoft Entra built-in roles](https://learn.microsoft.com/entra/ident
   Scanning 284 non-Microsoft SPs for dangerous permissions...
 ```
 
-| Category | Description |
-|---|---|
-| **Microsoft first-party** | Apps owned by Microsoft — identified using the [merill/microsoft-info](https://github.com/merill/microsoft-info) database (4,000+ known app IDs, refreshed daily) and `appOwnerOrganizationId`. All are cross-tenant by nature but are a known quantity. |
-| **Home tenant** | Apps your organization registered in Entra ID |
-| **Third-party (cross-tenant)** | Apps from non-Microsoft external vendors (SaaS products you've consented to). These are typically the highest-risk category — they originate from another organization's tenant and have been granted permissions in yours. |
-| **Unknown owner** | No `appOwnerOrganizationId` and not in the Microsoft lookup. May be legacy apps, managed identities with incomplete metadata, or apps from deleted tenants. These are exported to `UnknownOwnerApps.csv` with direct Entra portal links for investigation. |
+Every service principal in Entra ID has an `appOwnerOrganizationId` property — this is the tenant ID of the organization that originally registered the application. The auditor uses this property, combined with the [merill/microsoft-info](https://github.com/merill/microsoft-info) database (4,000+ known app IDs, refreshed daily), to classify each SP:
+
+| Category | How It's Identified | Security Implication |
+|---|---|---|
+| **Microsoft first-party** | `appOwnerOrganizationId` matches a known Microsoft org ID, or the app ID is in the merill/microsoft-info database. All are cross-tenant by nature but are a known quantity. | Lowest risk — managed by Microsoft, you can't modify them. Excluded from scanning. |
+| **Home tenant** | `appOwnerOrganizationId` matches your connected tenant ID and the app is not in the Microsoft lookup. These are apps your organization registered in Entra ID. | **Primary remediation focus** — you have full control over these apps (permissions, credentials, owners). Any dangerous permission on a home tenant app is directly actionable. |
+| **Third-party (cross-tenant)** | `appOwnerOrganizationId` is set but doesn't match your tenant or any known Microsoft org ID. These are external vendor apps (SaaS products) that have been consented into your tenant. | Highest inherent risk — they originate from another organization's tenant and have been granted permissions in yours. You can revoke consent or remove permissions, but you can't manage the app's credentials or code. |
+| **Unknown owner** | No `appOwnerOrganizationId` and not in the Microsoft lookup. May be legacy apps, managed identities with incomplete metadata, or apps from deleted tenants. | Investigate first — these need manual classification. Exported to `UnknownOwnerApps.csv` with direct Entra portal links. |
 
 4. Cross-references the data to map relationships (user → owns app → app has permission → escalation path)
 5. Outputs findings to the console with actionable remediation guidance
