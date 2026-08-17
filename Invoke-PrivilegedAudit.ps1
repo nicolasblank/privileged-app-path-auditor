@@ -36,7 +36,7 @@
     .\Invoke-PrivilegedAudit.ps1 -Mode StalePrivilege -InactiveDays 60
 
 .NOTES
-    Version: 0.5.0
+    Version: 0.5.1
 
     This project uses the Microsoft first-party app name database from
     merill/microsoft-info (https://github.com/merill/microsoft-info) — MIT licensed.
@@ -58,8 +58,9 @@ param(
     [string]$ConfigPath = (Join-Path $PSScriptRoot 'config')
 )
 
-$script:Version = '0.5.0'
+$script:Version = '0.5.1'
 $script:CachedDangerousApps = $null
+$script:StalePrivilegeDataAvailable = $null
 
 # Note: StrictMode is intentionally not set. The Microsoft Graph SDK returns\n# hashtables/OrderedDictionaries whose properties are not compatible with\n# StrictMode Version 2+ (.Count, property existence checks fail).
 $ErrorActionPreference = 'Stop'
@@ -781,15 +782,17 @@ function Get-AppInstanceLockStatus {
 function Get-SPSignInActivity {
     Write-Host "  Querying service principal sign-in activity..." -ForegroundColor Gray
     try {
-        $activities = Get-AllGraphPages -Uri 'https://graph.microsoft.com/v1.0/reports/servicePrincipalSignInActivities?$top=999'
+        # servicePrincipalSignInActivities is currently available only in Microsoft Graph beta.
+        $activities = Get-AllGraphPages -Uri 'https://graph.microsoft.com/beta/reports/servicePrincipalSignInActivities?$top=999'
         $lookup = @{}
         foreach ($a in $activities) {
             $lookup[$a.appId] = $a
         }
         return $lookup
     } catch {
-        Write-Host "  ⚠ Could not query sign-in activity (may require Entra ID P1/P2). Stale detection will be limited." -ForegroundColor Yellow
-        return @{}
+        Write-Host "  ⚠ Could not query sign-in activity. StalePrivilege cannot be evaluated safely." -ForegroundColor Yellow
+        Write-Host "    Verify AuditLog.Read.All, licensing, and Microsoft Graph beta availability." -ForegroundColor DarkYellow
+        return $null
     }
 }
 
@@ -1277,14 +1280,24 @@ function Invoke-ShadowAdminDetection {
 
 function Invoke-StalePrivilegeDetection {
     Write-Banner "STALE PRIVILEGE -- Dormant High-Privilege Apps with Valid Credentials"
+    $script:StalePrivilegeDataAvailable = $null
 
     $dangerousApps = Get-ServicePrincipalsWithAppRoles
     if ($dangerousApps.Count -eq 0) {
+        $script:StalePrivilegeDataAvailable = $true
         Write-Host "✓ No dangerous apps found." -ForegroundColor Green
         return @()
     }
 
     $signInActivity = Get-SPSignInActivity
+    if ($null -eq $signInActivity) {
+        $script:StalePrivilegeDataAvailable = $false
+        Write-Host "⚠ StalePrivilege skipped because service principal sign-in activity is unavailable." -ForegroundColor Yellow
+        Write-Host "  No apps will be classified as stale or as having never signed in." -ForegroundColor Yellow
+        return @()
+    }
+    $script:StalePrivilegeDataAvailable = $true
+
     $appIds = $dangerousApps | ForEach-Object { $_.AppId } | Select-Object -Unique
     $appCreds = Get-AppCredentials -AppIds $appIds
 
@@ -1631,7 +1644,11 @@ function Invoke-FullAudit {
     $summary['ShadowAdmins'] = "$($shadowResults.Count) shadow admin detected"
 
     $staleResults = Invoke-StalePrivilegeDetection
-    $summary['StalePrivilege'] = "$($staleResults.Count) dormant high-privilege apps"
+    $summary['StalePrivilege'] = if ($script:StalePrivilegeDataAvailable -eq $false) {
+        'Not evaluated (sign-in activity unavailable)'
+    } else {
+        "$($staleResults.Count) dormant high-privilege apps"
+    }
 
     $consentResults = Invoke-ConsentRiskAssessment
     $criticalConsent = ($consentResults | Where-Object { $_.Risk -match 'CRITICAL|HIGH' } | Measure-Object).Count
@@ -1649,7 +1666,7 @@ function Invoke-FullAudit {
     Write-Host "  Role Audit:            $($summary['RoleAudit'])" -ForegroundColor Gray
     Write-Host "  Attack Paths:          $($summary['AttackPaths'])" -ForegroundColor $(if ($attackResults.Count -gt 0) { 'Red' } else { 'Green' })
     Write-Host "  Shadow Admins:         $($summary['ShadowAdmins'])" -ForegroundColor $(if ($shadowResults.Count -gt 0) { 'Red' } else { 'Green' })
-    Write-Host "  Stale Privilege:       $($summary['StalePrivilege'])" -ForegroundColor $(if ($staleResults.Count -gt 0) { 'Yellow' } else { 'Green' })
+    Write-Host "  Stale Privilege:       $($summary['StalePrivilege'])" -ForegroundColor $(if ($script:StalePrivilegeDataAvailable -eq $false) { 'DarkYellow' } elseif ($staleResults.Count -gt 0) { 'Yellow' } else { 'Green' })
     Write-Host "  Consent Risk:          $($summary['ConsentRisk'])" -ForegroundColor $(if ($criticalConsent -gt 0) { 'Yellow' } else { 'Green' })
     Write-Host "  Credential Hygiene:    $($summary['CredentialHygiene'])" -ForegroundColor $(if ($secretApps -gt 0 -or $spCredApps -gt 0) { 'Yellow' } else { 'Green' })
 
@@ -1670,6 +1687,9 @@ function Invoke-FullAudit {
 
     Write-Host ""
     Write-Host "  OVERALL RISK:          $filled$empty  $overallRisk" -ForegroundColor $riskColor
+    if ($script:StalePrivilegeDataAvailable -eq $false) {
+        Write-Host "  DATA COVERAGE:         PARTIAL -- StalePrivilege was not evaluated" -ForegroundColor DarkYellow
+    }
 
     # Top actions
     $actions = @()
@@ -1712,6 +1732,7 @@ function Invoke-FullAudit {
         [PSCustomObject]@{ Section = 'ConsentRisk';        Finding = $summary['ConsentRisk'];        Count = $criticalConsent }
         [PSCustomObject]@{ Section = 'CredentialHygiene';  Finding = $summary['CredentialHygiene'];  Count = "$secretApps secrets, $spCredApps SP-creds" }
         [PSCustomObject]@{ Section = 'OverallRisk';        Finding = $overallRisk;                   Count = $riskScore }
+        [PSCustomObject]@{ Section = 'DataCoverage';       Finding = $(if ($script:StalePrivilegeDataAvailable -eq $false) { 'Partial -- StalePrivilege not evaluated' } else { 'Complete' }); Count = '' }
     )
     $actionNum = 0
     foreach ($action in ($actions | Select-Object -First 5)) {

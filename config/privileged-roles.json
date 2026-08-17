@@ -1,8 +1,8 @@
 {
   "$schema": "./schema/privileged-roles.schema.json",
   "description": "Entra ID built-in roles classified as privileged by Microsoft. These roles are marked with the Privileged label icon in the Microsoft Entra admin center and grant significant directory-level access.",
-  "version": "0.5.0",
-  "lastUpdated": "2026-03-15",
+  "version": "0.5.1",
+  "lastUpdated": "2026-08-17",
   "reference": "https://learn.microsoft.com/entra/identity/role-based-access-control/permissions-reference",
   "roles": [
     {
