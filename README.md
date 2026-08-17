@@ -1,6 +1,6 @@
 # Privileged App Path Auditor
 
-> **Version 0.5.0**
+> **Version 0.5.1**
 
 A PowerShell tool that maps privilege escalation attack paths through Entra ID application ownership. If a regular user owns an app registration that has `RoleManagement.ReadWrite.Directory`, `AppRoleAssignment.ReadWrite.All`, or another Global Admin-equivalent permission, that user can add a secret to the app, authenticate as it, and **silently become a Global Administrator** — no alerts, no approval, no MFA. This tool finds every one of those paths in your tenant.
 
@@ -48,6 +48,14 @@ This tool answers that question — and several others — by mapping the actual
 | `ConsentRisk` | Tenant consent policy configuration weaknesses |
 | `CredentialHygiene` | Credential type/count for high-privilege apps, including **SP-level credentials** (hidden from portal) and **app instance property lock** status |
 | `Full` | Runs all of the above |
+
+### What's New in v0.5.1
+
+This hotfix corrects and hardens service principal sign-in activity handling:
+
+- `StalePrivilege` now queries the Microsoft Graph beta endpoint, where `servicePrincipalSignInActivities` is currently available.
+- If sign-in activity cannot be retrieved, stale detection is skipped instead of treating missing data as evidence that every affected app has never signed in.
+- No stale findings or `StalePrivilege.csv` export are produced when the required activity data is unavailable.
 
 ### What's New in v0.5.0
 
@@ -782,7 +790,7 @@ Every service principal in Entra ID has an `appOwnerOrganizationId` property —
 
 - **Read-only** — this tool never modifies your tenant
 - **Delegated auth only** — requires an interactive sign-in (no support for app-only auth to avoid creating yet another privileged app)
-- **Sign-in log retention** — Entra ID retains sign-in logs for 7 days (free) or 30 days (P1/P2). StalePrivilege accuracy depends on your log retention
+- **Sign-in activity API and retention** — `StalePrivilege` uses the Microsoft Graph beta `servicePrincipalSignInActivities` API. Availability depends on Graph permissions, licensing, and cloud support, while accuracy depends on retained activity. If the API is unavailable, the mode is skipped rather than reporting false stale findings
 - **PIM eligible assignments** — detecting PIM-eligible (not active) role assignments requires Entra ID P2. The tool will report active assignments regardless of license and attempt PIM queries where available
 
 ## Configuration
