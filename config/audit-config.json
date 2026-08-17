@@ -1,7 +1,7 @@
 {
   "$schema": "./schema/audit-config.schema.json",
   "description": "Runtime configuration for the Privileged App Path Auditor. These settings control thresholds, exclusions, and behavior. Override values here to customize for your environment.",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "lastUpdated": "2026-08-17",
   "stalePrivilege": {
     "inactiveDays": 90,
@@ -18,11 +18,11 @@
     "description": "When true, ConsentRisk mode will enumerate apps that received user consent (not admin consent)"
   },
   "credentialHygiene": {
-    "preferredCredentialTypes": ["Certificate", "FederatedIdentityCredential"],
-    "riskyCredentialTypes": ["Password"],
+    "preferredCredentialTypes": ["Certificate", "Federated"],
+    "riskyCredentialTypes": ["Secret", "SP-Secret", "SP-Certificate"],
     "flagMultipleCredentials": true,
     "flagExpiredCredentials": true,
-    "description": "Credential type risk classification. Certificates and federated credentials are preferred over secrets (passwords)."
+    "description": "Credential type names match report values. Any direct SP credential is treated as critical because it is hidden from the app-registration credential view."
   },
   "output": {
     "maxUsersInRoleAuditList": 500,

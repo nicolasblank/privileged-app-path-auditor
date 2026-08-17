@@ -1,7 +1,7 @@
 {
   "$schema": "./schema/attack-paths.schema.json",
   "description": "Attack path definitions and remediation guidance. Each path describes how an unprivileged user can escalate to Global Administrator-equivalent access through Entra ID misconfigurations.",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "lastUpdated": "2026-08-17",
   "paths": [
     {
@@ -155,26 +155,27 @@
     },
     {
       "id": "ROLE_BASED_SP_CONTROL",
-      "name": "Application Admin Controls Privileged Service Principals",
+      "name": "Application-Control Role Reaches Privileged Service Principals",
       "severity": "Critical",
-      "description": "A user with Application Administrator or Cloud Application Administrator can add secrets to ANY service principal in the tenant — including SPs that hold Global Administrator or other privileged directory roles. This is the most common real-world escalation path to Global Admin.",
+      "description": "A user whose current built-in or custom role permissions allow application or service-principal credential changes may be able to authenticate as a service principal that holds a more sensitive directory role.",
       "chain": [
-        "User holds Application Administrator or Cloud Application Administrator role",
+        "User holds a built-in or custom role with service-principal credential control",
         "Tenant has service principals with privileged directory roles",
         "User adds a new secret/certificate to the privileged SP",
         "User authenticates as the SP using the new credential",
         "User inherits the SP's privileged directory role"
       ],
       "detection": {
-        "method": "Cross-reference users with Application Admin/Cloud App Admin roles against SPs holding privileged directory roles",
+        "method": "Cross-reference current role-definition capabilities and assignment scope against SPs holding sensitive directory roles, then account for existing user roles and app instance lock",
         "graphQueries": [
           "GET /roleManagement/directory/roleAssignments?$expand=principal",
           "GET /roleManagement/directory/roleDefinitions"
         ]
       },
       "remediation": [
-        "Use PIM with approval workflow for the Application Administrator role",
-        "Limit Application Administrator scope with Administrative Units",
+        "Use PIM with approval workflow for application-control roles",
+        "Scope custom and built-in application-control assignments as narrowly as possible",
+        "Enable app instance lock where the service-principal credential route can be blocked",
         "Monitor SP credential changes in Entra audit logs",
         "Remove permanent Application Administrator assignments where possible"
       ],

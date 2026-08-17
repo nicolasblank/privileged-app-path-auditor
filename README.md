@@ -1,16 +1,16 @@
 # Privileged App Path Auditor
 
-> **Version 0.5.1** · **[Roadmap](ROADMAP.md)**
+> **Version 0.5.2** · **[Roadmap](ROADMAP.md)**
 
-A PowerShell tool that maps privilege escalation attack paths through Entra ID application ownership. If a regular user owns an app registration that has `RoleManagement.ReadWrite.Directory`, `AppRoleAssignment.ReadWrite.All`, or another Global Admin-equivalent permission, that user can add a secret to the app, authenticate as it, and **silently become a Global Administrator** — no alerts, no approval, no MFA. This tool finds every one of those paths in your tenant.
+A PowerShell tool that maps privilege escalation attack paths through Entra ID application ownership. If a regular user owns an app registration that has `RoleManagement.ReadWrite.Directory`, `AppRoleAssignment.ReadWrite.All`, or another Global Admin-equivalent permission, that user can add a secret to the app, authenticate as it, and **silently become a Global Administrator** — no alerts, no approval, no MFA. This tool finds those paths in the evidence Microsoft Graph makes available and tells you when that evidence is incomplete.
 
-It also detects **role-based SP control** (Application Administrators who can add secrets to *any* SP with privileged roles — the [most common real-world escalation to Global Admin](https://posts.specterops.io/azure-privilege-escalation-via-service-principal-abuse-210ae2be2a5)), **SP-level credentials** hidden from the Entra portal, **unowned privileged apps** with no accountability, **app instance property lock** status, shadow admins, stale high-privilege apps, credential hygiene issues, and consent policy weaknesses — all in a single script with zero cost and no dependencies beyond the Microsoft Graph PowerShell SDK.
+It also detects **role-based SP control** by reading the current capabilities of built-in and custom roles, **SP-level credentials** hidden from the Entra portal, **unowned home-tenant apps** with no accountability, **app instance property lock** status, shadow admins, stale high-privilege apps, credential hygiene issues, and consent policy weaknesses — all in a single script with zero cost and no dependencies beyond the Microsoft Graph PowerShell SDK.
 
-> **No files are created unless you ask for them.** By default the script prints findings to the console only — no CSVs, no exports, no files written anywhere. To generate CSV reports, explicitly pass the `-ExportPath` parameter:
+> **Audit reports are only created when you ask for them.** By default the script prints findings to the console. The one operational exception is `config/MicrosoftApps.json`, a 24-hour local cache of the Microsoft first-party app catalog used for classification. To generate CSV reports, explicitly pass the `-ExportPath` parameter:
 > ```powershell
 > .\Invoke-PrivilegedAudit.ps1 -Mode Full -ExportPath ./audit-results
 > ```
-> Without `-ExportPath`, nothing is written to disk.
+> Without `-ExportPath`, no report or evidence files are written.
 
 ## Why This Exists
 
@@ -40,14 +40,31 @@ This tool answers that question — and several others — by mapping the actual
 
 | Mode | What It Detects |
 |---|---|
-| `PermissionAudit` | App registrations and service principals with Global Admin-equivalent permissions |
-| `RoleAudit` | Users who hold privileged directory roles vs. those who don't |
-| `AttackPath` | End-to-end paths: app owner escalation, **role-based SP control** (App Admin → any SP), and **unowned privileged apps** — enriched with SP-level credential counts and app instance lock status |
+| `PermissionAudit` | Application and delegated dangerous grants, kept separate and bound to the correct resource API |
+| `RoleAudit` | Active assignments to current Microsoft-classified or explicitly configured sensitive roles |
+| `AttackPath` | End-to-end paths: app owner escalation, capability-based **role control of sensitive SPs**, and confirmed **unowned home-tenant apps** |
 | `ShadowAdmins` | Users who own service principals that hold privileged directory roles, with **SP-level credential visibility** |
 | `StalePrivilege` | Dormant high-privilege apps with valid credentials and no recent sign-ins |
 | `ConsentRisk` | Tenant consent policy configuration weaknesses |
 | `CredentialHygiene` | Credential type/count for high-privilege apps, including **SP-level credentials** (hidden from portal) and **app instance property lock** status |
 | `Full` | Runs all of the above |
+
+Every run now reports data coverage. If a required Graph source fails, the auditor says the result is partial instead of turning missing evidence into a clean result.
+
+### What's New in v0.5.2
+
+This release corrects the meaning of existing findings:
+
+- Reads current Entra role definitions at runtime, including Microsoft's `isPrivileged` classification and the permitted actions used to find built-in or custom application-control roles.
+- Includes a dated fallback for important 2026 role additions and classification changes when the preview classification field is unavailable.
+- Compares a user's existing roles with the target role instead of assuming that any privileged role makes every path non-escalating.
+- Binds dangerous permission names to both grant type and resource API. A permission with the same name on an unrelated API is no longer matched.
+- Reports delegated grants as conditional exposure; they are not fed into the application-only credential takeover chain.
+- Correctly reads the Boolean app instance lock fields and shows disabled, partially configured, locked, unavailable, and not-applicable states.
+- Recognizes prefixed built-in consent policy assignments and reports custom consent policies for review instead of calling them disabled.
+- Limits application-owner and unowned-app analysis to local app registrations. Third-party service principals remain permission findings but are not treated as missing local applications.
+- Uses the documented disabled-app, credential-risk, expiry, multiple-credential, output-limit, and user-consent configuration values.
+- Adds regression coverage and a Windows/Linux/macOS test matrix.
 
 ### What's New in v0.5.1
 
@@ -118,7 +135,7 @@ All read-only. The tool never modifies your tenant.
 
 | Mode | What It Does | Typical Runtime |
 |---|---|---|
-| `PermissionAudit` | Flags apps with GA-equivalent application permissions | ~2 min |
+| `PermissionAudit` | Reports configured dangerous application and delegated grants | ~2 min |
 | `RoleAudit` | Lists users in/out of privileged directory roles | ~3 sec |
 | `AttackPath` | Maps user → app owner → privilege escalation chains | ~2 min |
 | `ShadowAdmins` | Finds users who own SPs that hold privileged roles | ~3 sec |
@@ -172,12 +189,16 @@ One CSV per mode is created in the export directory:
 | `UnknownOwnerApps.csv` | SPs with no owner org | App link |
 | `PermissionAudit.csv` | PermissionAudit | App link |
 | `RoleAudit.csv` | RoleAudit | User link |
+| `RoleAssignedGroups.csv` | RoleAudit (members are not expanded in v0.5.2) | — |
 | `AttackPaths.csv` | AttackPath | App + User links |
 | `UnownedPrivilegedApps.csv` | AttackPath | App link |
 | `ShadowAdmins.csv` | ShadowAdmins | SP + User links |
 | `StalePrivilege.csv` | StalePrivilege | App link |
 | `ConsentRisk.csv` | ConsentRisk | — |
+| `UserConsentGrants.csv` | ConsentRisk (complete grant list; console may be truncated) | — |
 | `CredentialHygiene.csv` | CredentialHygiene | App link |
+| `DataCoverage.csv` | Any mode | — |
+| `FullAuditSummary.csv` | Full | — |
 | `FullAuditSummary.csv` | Full (overall results, risk score, top actions) | — |
 
 `Summary.csv` contains the service principal classification breakdown (total, Microsoft first-party, home tenant, third-party, unknown owner, and how many were scanned). It is written by any mode that queries service principals.
@@ -246,7 +267,7 @@ Unknown owner apps are **not** filtered from scanning — they are checked for d
 
 ### Investigating Attack Paths
 
-Attack path findings are the highest-severity output of the tool. Each row in `AttackPaths.csv` represents a confirmed, exploitable privilege escalation chain: a non-admin user who owns an app that has a Global Admin-equivalent permission.
+Attack path findings are the highest-severity output of the tool. A row may represent a local app owner reaching a dangerous application permission or a user with an application-control role reaching a service principal with a more sensitive role. Check `Exploitability`: `Direct` is actionable, `PotentialLockUnknown` needs lock verification, and `MitigatedByAppInstanceLock` records a control that currently blocks the service-principal credential route.
 
 #### Understanding the Finding
 
@@ -254,15 +275,15 @@ Every attack path has three components:
 
 | Component | CSV Column | What It Means |
 |---|---|---|
-| **The user** | `UserUPN`, `UserDisplayName` | A regular user with no privileged Entra ID roles. They are an owner of the app registration, which means they can modify its credentials. |
-| **The app** | `AppName`, `AppId` | An app registration whose service principal has been granted a dangerous application permission (e.g. `RoleManagement.ReadWrite.Directory`). |
-| **The escalation** | `Permission`, `Action`, `Result` | What the user can do: add a secret, authenticate as the app, and exploit the permission to reach Global Admin equivalence. |
+| **The user** | `UserUPN`, `UserDisplayName`, `UserRole` | The owner or role holder. A narrower existing sensitive role is shown rather than incorrectly suppressing the path. |
+| **The target** | `AppName`, `AppId`, `Permission`, `PermissionType` | The local app with a dangerous application grant or the service principal with a more sensitive directory role. |
+| **The escalation** | `Action`, `Result`, `Exploitability` | The credential route, its result, and whether the route is currently direct or blocked by app instance lock. |
 
 The `AppEntraUrl` link opens the enterprise application blade; the `UserEntraUrl` link opens the user's profile.
 
 #### Why This Is Critical
 
-The user does not need any admin role to execute this attack. App owners can add credentials to their apps through the Entra portal, the Azure CLI, or the Microsoft Graph API. Once they have a credential, they authenticate as the service principal — inheriting every application permission the app has been granted. If that includes `RoleManagement.ReadWrite.Directory`, they can assign themselves Global Administrator. The entire chain can be completed in under a minute with no approval workflow and no MFA (unless Conditional Access for workload identities is configured).
+An app owner does not need an admin role to use an app credential. A role-based path is different: it depends on the current credential-control actions and assignment scope of a built-in or custom role. In both cases, the auditor compares the reachable privilege with what the user already holds.
 
 #### Step-by-Step Investigation
 
@@ -493,7 +514,7 @@ Reference: https://learn.microsoft.com/graph/permissions-overview#best-practices
 
 ### RoleAudit
 
-Lists users in privileged roles and those not in any privileged role.
+Lists active assignments to sensitive roles and, only when role and user evidence is complete, users without those roles.
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════╗
@@ -703,7 +724,7 @@ Runs all modes sequentially and produces a summary:
 
   Permission Audit:      4 apps with GA-equivalent permissions
   Role Audit:            7 users in privileged roles, 243 not
-  Attack Paths:          2 critical escalation paths found
+  Attack Paths:          2 direct, 1 potential, 1 blocked by app instance lock
   Shadow Admins:         1 shadow admin detected
   Stale Privilege:       3 dormant high-privilege apps
   Consent Risk:          4 HIGH/CRITICAL consent policy issues
@@ -712,7 +733,7 @@ Runs all modes sequentially and produces a summary:
   OVERALL RISK:          ██████████░░░░░░░░░░  HIGH
 
   Top 3 Actions:
-    1. Remove non-admin owners from apps with dangerous permissions (2 paths)
+    1. Remove or constrain the control relationships behind 2 exploitable app paths
     2. Disable user consent or restrict to verified publishers
     3. Disable/delete 3 dormant apps with dangerous permissions and valid credentials
 
@@ -721,7 +742,7 @@ Runs all modes sequentially and produces a summary:
 
 ## Dangerous Permissions Reference
 
-These application permissions are flagged as Global Admin-equivalent because they allow an app to escalate its own or others' privileges:
+These high-impact grants are bound to Microsoft Graph (`00000003-0000-0000-c000-000000000000`) and to their application or delegated grant type:
 
 | Permission | Why It's Dangerous |
 |---|---|
@@ -733,28 +754,17 @@ These application permissions are flagged as Global Admin-equivalent because the
 
 Source: [Microsoft Graph permissions overview — Best practices](https://learn.microsoft.com/graph/permissions-overview#best-practices-for-using-microsoft-graph-permissions)
 
-## Privileged Roles Checked
+## Role Handling
 
-The following Entra ID built-in roles are classified as privileged (marked with the Privileged label by Microsoft):
+The auditor does not rely on a frozen list as its primary source. It reads the tenant's current role definitions and separates three questions:
 
-| Role | Template ID |
-|---|---|
-| Global Administrator | `62e90394-69f5-4237-9190-012177145e10` |
-| Privileged Role Administrator | `e8611ab8-c189-46e8-94e1-60213ab1f814` |
-| Privileged Authentication Administrator | `7be44c8a-adaf-4e2a-84d6-ab2649e08a13` |
-| Global Reader | `f2ef992c-3afb-46b9-b7cf-a126ee74c451` |
-| Security Administrator | `194ae4cb-b126-40b2-bd5b-6091b380977d` |
-| Conditional Access Administrator | `b1be1c3e-b65d-4f19-8427-f6fa0d97feb9` |
-| Exchange Administrator | `29232cdf-9323-42fd-ade2-1d097af3e4de` |
-| SharePoint Administrator | `f28a1f50-f6e7-4571-818b-6a12f2af6b6c` |
-| User Administrator | `fe930be7-5e62-47db-91af-98c3a49a38b1` |
-| Application Administrator | `9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3` |
-| Cloud Application Administrator | `158c047a-c907-4556-b7ef-446551a6b5f7` |
-| Authentication Administrator | `c4e39bd9-1100-46d3-8c65-fb160da0071f` |
-| Helpdesk Administrator | `729827e3-9c14-49f7-bb1b-9608f156bbb8` |
-| Intune Administrator | `3a2c62db-5318-420d-8d74-23affee5d9d5` |
+1. Is the role a sensitive target? Microsoft's current `isPrivileged` classification and the configured fallback policy answer this.
+2. Can the role change application or service-principal credentials? The role's current `allowedResourceActions` answer this, including for custom roles.
+3. Would reaching the target actually increase this user's privilege? Existing Global Administrator and matching target-role assignments are accounted for separately.
 
-Source: [Microsoft Entra built-in roles](https://learn.microsoft.com/entra/identity/role-based-access-control/permissions-reference)
+The fallback in `config/privileged-roles.json` includes the project's established roles plus 2026 changes relevant to this scope, including AI Administrator, AI Reader, Agent ID Administrator, Agent Registry Administrator, Authentication Extensibility Password Administrator, Entra Backup Administrator, Identity Governance Administrator, Security Operator, and Tenant Governance Administrator. The runtime definition remains the better source when it is available.
+
+Sources: [Microsoft Entra built-in roles](https://learn.microsoft.com/entra/identity/role-based-access-control/permissions-reference), [Privileged roles and permissions](https://learn.microsoft.com/entra/identity/role-based-access-control/privileged-roles-permissions), and [Microsoft Entra RBAC changes](https://learn.microsoft.com/entra/identity/role-based-access-control/whats-new)
 
 ## How It Works
 
@@ -791,7 +801,9 @@ Every service principal in Entra ID has an `appOwnerOrganizationId` property —
 - **Read-only** — this tool never modifies your tenant
 - **Delegated auth only** — requires an interactive sign-in (no support for app-only auth to avoid creating yet another privileged app)
 - **Sign-in activity API and retention** — `StalePrivilege` uses the Microsoft Graph beta `servicePrincipalSignInActivities` API. Availability depends on Graph permissions, licensing, and cloud support, while accuracy depends on retained activity. If the API is unavailable, the mode is skipped rather than reporting false stale findings
-- **PIM eligible assignments** — detecting PIM-eligible (not active) role assignments requires Entra ID P2. The tool will report active assignments regardless of license and attempt PIM queries where available
+- **Preview role classification** — Microsoft's role `isPrivileged` field is currently exposed through Microsoft Graph beta. If it is unavailable, the auditor uses the configured fallback and marks role-definition coverage partial
+- **Active direct assignments** — v0.5.2 reports active role assignments. PIM-eligible assignments and transitive members of role-assigned groups are not expanded yet; a detected role-assigned group is explicitly marked as partial coverage
+- **Scope interpretation** — tenant-wide and target-specific SP assignment scopes are enforced for credential-control paths. Broader PIM, group, and administrative-scope modeling remains planned for v0.6.0
 
 ## Configuration
 
@@ -802,7 +814,7 @@ The tool works out of the box with zero configuration. All dangerous permissions
 | File | Purpose |
 |---|---|
 | `config/dangerous-permissions.json` | Permissions flagged as GA-equivalent |
-| `config/privileged-roles.json` | Entra ID built-in roles classified as privileged |
+| `config/privileged-roles.json` | Explicit sensitive-target and fallback role policy |
 | `config/audit-config.json` | Thresholds, filters, and output settings |
 | `config/attack-paths.json` | Attack path definitions and remediation guidance |
 
@@ -816,6 +828,8 @@ Add or remove permissions in `config/dangerous-permissions.json`:
     {
       "name": "RoleManagement.ReadWrite.Directory",
       "type": "Application",
+      "resourceAppId": "00000003-0000-0000-c000-000000000000",
+      "resourceName": "Microsoft Graph",
       "risk": "Critical",
       "reason": "Can assign any Entra ID role to any principal"
     }
@@ -825,7 +839,7 @@ Add or remove permissions in `config/dangerous-permissions.json`:
 
 ### Customizing Roles
 
-Add custom or tenant-specific roles in `config/privileged-roles.json`:
+Add a built-in role template to the explicit sensitive-target fallback in `config/privileged-roles.json`:
 
 ```json
 {
@@ -839,6 +853,8 @@ Add custom or tenant-specific roles in `config/privileged-roles.json`:
 }
 ```
 
+Custom roles do not need to be copied into this file. They are discovered from the tenant's live role definitions and classified by their allowed resource actions. The fallback file uses stable built-in template IDs.
+
 ### Audit Settings
 
 Override thresholds in `config/audit-config.json`:
@@ -847,8 +863,15 @@ Override thresholds in `config/audit-config.json`:
 {
   "stalePrivilege": { "inactiveDays": 60 },
   "filters": {
+    "excludeDisabledApps": true,
     "excludeFirstPartyMicrosoftApps": true,
     "excludeAppIds": ["app-id-to-skip"]
+  },
+  "credentialHygiene": {
+    "preferredCredentialTypes": ["Certificate", "Federated"],
+    "riskyCredentialTypes": ["Secret", "SP-Secret", "SP-Certificate"],
+    "flagMultipleCredentials": true,
+    "flagExpiredCredentials": true
   }
 }
 ```

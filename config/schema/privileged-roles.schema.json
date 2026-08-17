@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "privileged-roles.schema.json",
+  "title": "Sensitive role fallback policy",
+  "type": "object",
+  "required": ["version", "roles"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "description": { "type": "string" },
+    "version": { "type": "string" },
+    "lastUpdated": { "type": "string", "format": "date" },
+    "reference": { "type": "string", "format": "uri" },
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "templateId", "tier", "reason"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "templateId": { "type": "string", "format": "uuid" },
+          "tier": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

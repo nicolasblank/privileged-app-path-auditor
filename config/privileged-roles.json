@@ -1,7 +1,7 @@
 {
   "$schema": "./schema/privileged-roles.schema.json",
-  "description": "Entra ID built-in roles classified as privileged by Microsoft. These roles are marked with the Privileged label icon in the Microsoft Entra admin center and grant significant directory-level access.",
-  "version": "0.5.1",
+  "description": "Fallback sensitive-role policy used alongside live Microsoft Graph role definitions. Runtime isPrivileged and rolePermissions data handles current built-in and custom roles; this list supplies explicit targets and a fallback when preview classification is unavailable.",
+  "version": "0.5.2",
   "lastUpdated": "2026-08-17",
   "reference": "https://learn.microsoft.com/entra/identity/role-based-access-control/permissions-reference",
   "roles": [
@@ -88,6 +88,66 @@
       "templateId": "3a2c62db-5318-420d-8d74-23affee5d9d5",
       "tier": "High",
       "reason": "Full access to Microsoft Intune including device and policy management"
+    },
+    {
+      "name": "AI Administrator",
+      "templateId": "d2562ede-74db-457e-a7b6-544e236ebb61",
+      "tier": "High",
+      "reason": "Can manage Microsoft 365 AI resources and current agent identity capabilities"
+    },
+    {
+      "name": "AI Reader",
+      "templateId": "1fe13547-53f6-408d-ac04-7f8eed167b38",
+      "tier": "High",
+      "reason": "Classified as privileged by Microsoft despite its read-oriented name"
+    },
+    {
+      "name": "Agent ID Administrator",
+      "templateId": "db506228-d27e-4b7d-95e5-295956d6615f",
+      "tier": "High",
+      "reason": "Can manage agent identities, authentication, and role assignments"
+    },
+    {
+      "name": "Agent Registry Administrator",
+      "templateId": "6b942400-691f-4bf0-9d12-d8a254a2baf5",
+      "tier": "High",
+      "reason": "Can manage the agent registry and related governance data"
+    },
+    {
+      "name": "Authentication Extensibility Password Administrator",
+      "templateId": "0b00bede-4072-4d22-b441-e7df02a1ef63",
+      "tier": "High",
+      "reason": "Can manage password authentication extensibility configuration"
+    },
+    {
+      "name": "Customer Delegated Administration Relationship Administrator",
+      "templateId": "fc8ad4e2-40e4-4724-8317-bcda7503ecbf",
+      "tier": "High",
+      "reason": "Can manage delegated administration relationships"
+    },
+    {
+      "name": "Entra Backup Administrator",
+      "templateId": "b6a27b2b-f905-4b2e-81b5-0d90e0ef1fdb",
+      "tier": "High",
+      "reason": "Can manage backup and recovery operations for directory objects"
+    },
+    {
+      "name": "Identity Governance Administrator",
+      "templateId": "45d8d3c5-c802-45c6-b32a-1d70b5e1e86e",
+      "tier": "High",
+      "reason": "Microsoft marked this role privileged in May 2026; it includes governance and service-principal assignment capabilities"
+    },
+    {
+      "name": "Security Operator",
+      "templateId": "5f2222b1-57c3-48ba-8ad5-d4759f1fde6f",
+      "tier": "High",
+      "reason": "Can perform identity security containment and response operations"
+    },
+    {
+      "name": "Tenant Governance Administrator",
+      "templateId": "1981f584-96e9-4a6f-95b0-f522373f8fae",
+      "tier": "High",
+      "reason": "Microsoft marked this cross-tenant governance role privileged in July 2026"
     }
   ]
 }

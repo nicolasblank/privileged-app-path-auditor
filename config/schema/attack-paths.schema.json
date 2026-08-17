@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "attack-paths.schema.json",
+  "title": "Attack path definitions",
+  "type": "object",
+  "required": ["version", "paths"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "description": { "type": "string" },
+    "version": { "type": "string" },
+    "lastUpdated": { "type": "string", "format": "date" },
+    "paths": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "severity", "description", "chain", "detection", "remediation", "references"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]+$" },
+          "name": { "type": "string", "minLength": 1 },
+          "severity": { "enum": ["Critical", "High", "Medium", "Low", "Info"] },
+          "description": { "type": "string", "minLength": 1 },
+          "chain": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "detection": {
+            "type": "object",
+            "required": ["method", "graphQueries"],
+            "properties": {
+              "method": { "type": "string" },
+              "graphQueries": { "type": "array", "items": { "type": "string" } }
+            },
+            "additionalProperties": false
+          },
+          "remediation": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "references": { "type": "array", "items": { "type": "string", "format": "uri" } }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

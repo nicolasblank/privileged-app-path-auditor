@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dangerous-permissions.schema.json",
+  "title": "Dangerous permission policy",
+  "type": "object",
+  "required": ["version", "permissions"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "description": { "type": "string" },
+    "version": { "type": "string" },
+    "lastUpdated": { "type": "string", "format": "date" },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "type", "resourceAppId", "resourceName", "risk", "reason"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "type": { "enum": ["Application", "Delegated"] },
+          "resourceAppId": { "type": "string", "format": "uuid" },
+          "resourceName": { "type": "string", "minLength": 1 },
+          "risk": { "enum": ["Critical", "High", "Medium", "Low", "Info"] },
+          "reason": { "type": "string", "minLength": 1 },
+          "attackAction": { "type": "string" },
+          "reference": { "type": "string", "format": "uri" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
