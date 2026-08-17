@@ -229,17 +229,28 @@ Describe 'Current and custom role handling' {
         Test-UserAlreadyEquivalentToPermission 'apps' 'RoleManagement.ReadWrite.Directory' $assignments | Should -BeFalse
     }
 
+    It 'uses the reachable role tier for role-control path severity' {
+        Get-RoleImpactSeverity @([PSCustomObject]@{ RoleTier = 'Medium' }) | Should -Be 'MEDIUM'
+        Get-RoleImpactSeverity @([PSCustomObject]@{ RoleTier = 'High' }) | Should -Be 'HIGH'
+        Get-RoleImpactSeverity @(
+            [PSCustomObject]@{ RoleTier = 'High' },
+            [PSCustomObject]@{ RoleTier = 'Critical' }
+        ) | Should -Be 'CRITICAL'
+    }
+
     It 'loads live beta classification and custom application-control roles' {
         Mock Write-Host {}
         Mock Get-AllGraphPages {
             param($Uri)
             if ($Uri -match 'roleDefinitions') {
+                $Uri | Should -Not -Match '\?'
                 return @(
                     [PSCustomObject]@{ id = 'rd-ai'; templateId = '1fe13547-53f6-408d-ac04-7f8eed167b38'; displayName = 'AI Reader'; isBuiltIn = $true; isEnabled = $true; isPrivileged = $true; rolePermissions = @() },
                     [PSCustomObject]@{ id = 'rd-custom'; templateId = $null; displayName = 'Custom SP Credential Operator'; isBuiltIn = $false; isEnabled = $true; isPrivileged = $false; rolePermissions = @([PSCustomObject]@{ allowedResourceActions = @('microsoft.directory/servicePrincipals/credentials/update') }) }
                 )
             }
             if ($Uri -match 'roleAssignments') {
+                $Uri | Should -Be 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?$expand=principal'
                 return @(
                     [PSCustomObject]@{ roleDefinitionId = 'rd-ai'; principalId = 'sp-ai'; directoryScopeId = '/'; appScopeId = $null; principal = [PSCustomObject]@{ '@odata.type' = '#microsoft.graph.servicePrincipal'; displayName = 'AI SP'; appId = 'ai-app' } },
                     [PSCustomObject]@{ roleDefinitionId = 'rd-custom'; principalId = 'user-1'; directoryScopeId = '/'; appScopeId = $null; principal = [PSCustomObject]@{ '@odata.type' = '#microsoft.graph.user'; displayName = 'Operator'; userPrincipalName = 'operator@contoso.test' } }
@@ -301,6 +312,7 @@ Describe 'Attack-path regression fixture' {
         Mock Get-PrivilegedRoleAssignments {
             Set-CoverageState -Source 'RoleDefinitions' -State Complete
             Set-CoverageState -Source 'ActiveRoleAssignments' -State Complete
+            Set-CoverageState -Source 'RoleGroupMemberships' -State Complete
             return @(
                 [PSCustomObject]@{ PrincipalId = 'reader'; PrincipalType = '#microsoft.graph.user'; PrincipalDisplayName = 'Reader'; PrincipalUPN = 'reader@contoso.test'; RoleDefinitionId = 'rd-reader'; RoleTemplateId = '1fe13547-53f6-408d-ac04-7f8eed167b38'; RoleName = 'AI Reader'; IsSensitiveTarget = $true; CanControlServicePrincipals = $false },
                 [PSCustomObject]@{ PrincipalId = 'ga'; PrincipalType = '#microsoft.graph.user'; PrincipalDisplayName = 'GA'; PrincipalUPN = 'ga@contoso.test'; RoleDefinitionId = 'rd-ga'; RoleTemplateId = '62e90394-69f5-4237-9190-012177145e10'; RoleName = 'Global Administrator'; IsSensitiveTarget = $true; CanControlServicePrincipals = $false },
@@ -520,11 +532,18 @@ Describe 'Microsoft first-party catalog cache' {
         $catalogPath = Join-Path $TestDrive 'download'
         New-Item -ItemType Directory -Path $catalogPath | Out-Null
         Mock Invoke-RestMethod {
-            return @([PSCustomObject]@{ AppId = '00000003-0000-0000-c000-000000000000'; AppDisplayName = 'Microsoft Graph' })
+            return @(
+                [PSCustomObject]@{ AppId = '00000003-0000-0000-c000-000000000000'; AppDisplayName = 'Microsoft Graph' },
+                [PSCustomObject]@{ AppId = '00000002-0000-0000-c000-000000000000'; AppDisplayName = 'Azure AD Graph' },
+                [PSCustomObject]@{ AppId = "00000004-0000-0000-c000-000000000000$([char]0x00A0)"; AppDisplayName = 'Recoverable suffix' }
+            )
         }
 
         $result = Update-MicrosoftAppsLookup -CatalogConfigPath $catalogPath
+        $result.Count | Should -Be 3
         $result.Contains('00000003-0000-0000-c000-000000000000') | Should -BeTrue
+        $result.Contains('00000002-0000-0000-c000-000000000000') | Should -BeTrue
+        $result.Contains('00000004-0000-0000-c000-000000000000') | Should -BeTrue
         Test-Path (Join-Path $catalogPath 'MicrosoftApps.json') | Should -BeTrue
         Test-Path (Join-Path $catalogPath 'MicrosoftApps.json.tmp') | Should -BeFalse
         $script:Coverage.MicrosoftFirstPartyAppCatalog.State | Should -Be 'Complete'
@@ -568,6 +587,35 @@ Describe 'Role fallback and evidence safety' {
         $result[0].CanControlServicePrincipals | Should -BeTrue
         $result[0].DefinitionSource | Should -Be 'V1WithConfiguredSensitivityFallback'
         $script:Coverage.RoleDefinitions.State | Should -Be 'Partial'
+    }
+
+    It 'resolves an assignment definition omitted from the collection with an item lookup' {
+        Mock Write-Host {}
+        Mock Get-AllGraphPages {
+            param($Uri)
+            if ($Uri -match 'roleDefinitions') { return @() }
+            if ($Uri -match 'roleAssignments') {
+                return @([PSCustomObject]@{
+                    roleDefinitionId = 'omitted-definition'; principalId = 'user-1'; directoryScopeId = '/'; appScopeId = $null
+                    principal = [PSCustomObject]@{ '@odata.type' = '#microsoft.graph.user'; displayName = 'User'; userPrincipalName = 'user@contoso.test' }
+                })
+            }
+            throw "Unexpected URI: $Uri"
+        }
+        Mock Invoke-MgGraphRequest {
+            param($Method, $Uri)
+            $Uri | Should -Be 'https://graph.microsoft.com/beta/roleManagement/directory/roleDefinitions/omitted-definition'
+            return [PSCustomObject]@{
+                id = 'omitted-definition'; templateId = '62e90394-69f5-4237-9190-012177145e10'
+                displayName = 'Global Administrator'; isBuiltIn = $true; isEnabled = $true; isPrivileged = $true; rolePermissions = @()
+            }
+        }
+
+        $result = @(Get-PrivilegedRoleAssignments)
+        $result.Count | Should -Be 1
+        $result[0].DefinitionSource | Should -Be 'MicrosoftGraphBetaItemFallback'
+        $script:Coverage.RoleDefinitions.State | Should -Be 'Complete'
+        Should -Invoke Invoke-MgGraphRequest -Times 1 -Exactly
     }
 
     It 'marks role-assigned group expansion as partial' {

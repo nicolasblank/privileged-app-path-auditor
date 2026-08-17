@@ -56,6 +56,7 @@ Every run now reports data coverage. If a required Graph source fails, the audit
 This release corrects the meaning of existing findings:
 
 - Reads current Entra role definitions at runtime, including Microsoft's `isPrivileged` classification and the permitted actions used to find built-in or custom application-control roles.
+- Uses the role-definition collection options Microsoft Graph currently supports and resolves legacy definitions individually when the collection omits them.
 - Includes a dated fallback for important 2026 role additions and classification changes when the preview classification field is unavailable.
 - Compares a user's existing roles with the target role instead of assuming that any privileged role makes every path non-escalating.
 - Binds dangerous permission names to both grant type and resource API. A permission with the same name on an unrelated API is no longer matched.
@@ -63,6 +64,7 @@ This release corrects the meaning of existing findings:
 - Correctly reads the Boolean app instance lock fields and shows disabled, partially configured, locked, unavailable, and not-applicable states.
 - Recognizes prefixed built-in consent policy assignments and reports custom consent policies for review instead of calling them disabled.
 - Limits application-owner and unowned-app analysis to local app registrations. Third-party service principals remain permission findings but are not treated as missing local applications.
+- Validates and normalizes the downloaded Microsoft first-party app catalog without discarding the full catalog for recoverable encoding debris in one entry.
 - Uses the documented disabled-app, credential-risk, expiry, multiple-credential, output-limit, and user-consent configuration values.
 - Adds regression coverage and a Windows/Linux/macOS test matrix.
 
@@ -104,6 +106,7 @@ Install-Module Microsoft.Graph.Identity.SignIns -Scope CurrentUser
 - **Entra ID account** with one of these roles:
   - Global Reader (recommended — least privilege for full read access)
   - Directory Reader + Security Reader
+  - Global Administrator (works, but should not be assigned solely to run this read-only audit)
   - A custom read-only role that includes the required directory, application, policy, and audit-log read actions
 
 ### Required Graph Scopes

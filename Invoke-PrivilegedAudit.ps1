@@ -318,10 +318,18 @@ function Update-MicrosoftAppsLookup {
     if ($needsDownload) {
         try {
             Write-Verbose "Downloading Microsoft first-party app list from merill/microsoft-info..."
-            $response = @(Invoke-RestMethod -Uri $sourceUrl -Method Get -ErrorAction Stop)
+            # Invoke-RestMethod can emit a JSON array as one pipeline object when it is
+            # wrapped at the call site. Assign first, then enumerate it explicitly.
+            $downloadedCatalog = Invoke-RestMethod -Uri $sourceUrl -Method Get -ErrorAction Stop
+            $response = @($downloadedCatalog)
             $validEntries = @($response | Where-Object {
                 if (-not $_.AppId) { return $false }
-                try { [void][guid]::Parse([string]$_.AppId); return $true } catch { return $false }
+                # The upstream catalog has occasionally contained encoding debris after
+                # an otherwise valid GUID. Recover only an unambiguous leading GUID.
+                $match = [regex]::Match([string]$_.AppId, '^(?<id>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})')
+                if (-not $match.Success) { return $false }
+                $_.AppId = $match.Groups['id'].Value
+                return $true
             })
             if ($response.Count -eq 0 -or $validEntries.Count -ne $response.Count) {
                 throw 'Downloaded Microsoft application data was empty or contained invalid app IDs.'
@@ -582,6 +590,41 @@ function Test-UserAlreadyEquivalentToPermission {
             ) | Where-Object { $_ -in $userTemplateIds } | Select-Object -First 1)
         }
         default { return $false }
+    }
+}
+
+function Get-RoleImpactSeverity {
+    param([object[]]$RoleAssignments)
+
+    $tiers = @($RoleAssignments | ForEach-Object { [string]$_.RoleTier })
+    if ($tiers -contains 'Critical') { return 'CRITICAL' }
+    if ($tiers -contains 'High' -or $tiers -contains 'Microsoft privileged' -or $tiers -contains 'Application control') { return 'HIGH' }
+    if ($tiers -contains 'Medium') { return 'MEDIUM' }
+    return 'HIGH'
+}
+
+function ConvertTo-RoleDefinitionEvidence {
+    param(
+        [Parameter(Mandatory)][object]$RoleDefinition,
+        [Parameter(Mandatory)][hashtable]$ConfiguredRoles,
+        [Parameter(Mandatory)][string]$DefinitionSource
+    )
+
+    $configured = if ($RoleDefinition.templateId -and $ConfiguredRoles.ContainsKey([string]$RoleDefinition.templateId)) { $ConfiguredRoles[[string]$RoleDefinition.templateId] } else { $null }
+    $graphSaysPrivileged = (Test-ObjectHasProperty -InputObject $RoleDefinition -Name 'isPrivileged') -and [bool]$RoleDefinition.isPrivileged
+    return [PSCustomObject]@{
+        Id                            = $RoleDefinition.id
+        TemplateId                    = $RoleDefinition.templateId
+        DisplayName                   = $RoleDefinition.displayName
+        IsBuiltIn                     = [bool]$RoleDefinition.isBuiltIn
+        IsEnabled                     = if (Test-ObjectHasProperty -InputObject $RoleDefinition -Name 'isEnabled') { [bool]$RoleDefinition.isEnabled } else { $true }
+        IsSensitiveTarget             = $graphSaysPrivileged -or $null -ne $configured
+        MicrosoftClassifiedPrivileged = $graphSaysPrivileged
+        CanControlApplications        = Test-RoleCanControlApplications -RoleDefinition $RoleDefinition
+        CanControlServicePrincipals   = Test-RoleCanControlServicePrincipals -RoleDefinition $RoleDefinition
+        AllowedResourceActions        = @(Get-RoleAllowedResourceActions -RoleDefinition $RoleDefinition)
+        Tier                          = if ($configured) { $configured.tier } else { if ($graphSaysPrivileged) { 'Microsoft privileged' } else { 'Application control' } }
+        DefinitionSource              = $DefinitionSource
     }
 }
 
@@ -909,14 +952,19 @@ function Get-PrivilegedRoleAssignments {
 
     Write-Host "  Querying directory role assignments..." -ForegroundColor Gray
     $definitionSource = 'MicrosoftGraphBeta'
+    $definitionApiVersion = 'beta'
     try {
-        $roleDefs = @(Get-AllGraphPages -Uri 'https://graph.microsoft.com/beta/roleManagement/directory/roleDefinitions?$select=id,templateId,displayName,isBuiltIn,isEnabled,isPrivileged,rolePermissions,version&$top=999')
+        # The role-definition collection currently documents only $filter support.
+        # Request the collection without unsupported $select/$top options; the response
+        # already includes isPrivileged and rolePermissions in beta.
+        $roleDefs = @(Get-AllGraphPages -Uri 'https://graph.microsoft.com/beta/roleManagement/directory/roleDefinitions')
         Set-CoverageState -Source 'RoleDefinitions' -State Complete
     } catch {
         $betaError = $_.Exception.Message
         try {
-            $roleDefs = @(Get-AllGraphPages -Uri 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions?$select=id,templateId,displayName,isBuiltIn,isEnabled,rolePermissions,version&$top=999')
+            $roleDefs = @(Get-AllGraphPages -Uri 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions')
             $definitionSource = 'V1WithConfiguredSensitivityFallback'
+            $definitionApiVersion = 'v1.0'
             Set-CoverageState -Source 'RoleDefinitions' -State Partial -Detail "Beta isPrivileged unavailable; configured sensitive-role fallback used: $betaError"
         } catch {
             Set-CoverageState -Source 'RoleDefinitions' -State Unavailable -Detail $_.Exception.Message
@@ -926,7 +974,7 @@ function Get-PrivilegedRoleAssignments {
     }
 
     try {
-        $allAssignments = @(Get-AllGraphPages -Uri 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?$expand=principal&$top=999')
+        $allAssignments = @(Get-AllGraphPages -Uri 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?$expand=principal')
         Set-CoverageState -Source 'ActiveRoleAssignments' -State Complete
     } catch {
         Set-CoverageState -Source 'ActiveRoleAssignments' -State Unavailable -Detail $_.Exception.Message
@@ -938,32 +986,27 @@ function Get-PrivilegedRoleAssignments {
     foreach ($role in $script:PrivilegedRoles) { $configuredRoles[$role.templateId] = $role }
     $definitionEvidence = @{}
     foreach ($rd in $roleDefs) {
-        $configured = if ($rd.templateId -and $configuredRoles.ContainsKey([string]$rd.templateId)) { $configuredRoles[[string]$rd.templateId] } else { $null }
-        $graphSaysPrivileged = (Test-ObjectHasProperty -InputObject $rd -Name 'isPrivileged') -and [bool]$rd.isPrivileged
-        $isSensitiveTarget = $graphSaysPrivileged -or $null -ne $configured
-        $definitionEvidence[$rd.id] = [PSCustomObject]@{
-            Id                          = $rd.id
-            TemplateId                  = $rd.templateId
-            DisplayName                 = $rd.displayName
-            IsBuiltIn                   = [bool]$rd.isBuiltIn
-            IsEnabled                   = if (Test-ObjectHasProperty -InputObject $rd -Name 'isEnabled') { [bool]$rd.isEnabled } else { $true }
-            IsSensitiveTarget           = $isSensitiveTarget
-            MicrosoftClassifiedPrivileged = $graphSaysPrivileged
-            CanControlApplications      = Test-RoleCanControlApplications -RoleDefinition $rd
-            CanControlServicePrincipals = Test-RoleCanControlServicePrincipals -RoleDefinition $rd
-            AllowedResourceActions      = @(Get-RoleAllowedResourceActions -RoleDefinition $rd)
-            Tier                        = if ($configured) { $configured.tier } else { if ($graphSaysPrivileged) { 'Microsoft privileged' } else { 'Application control' } }
-            DefinitionSource            = $definitionSource
-        }
+        $definitionEvidence[$rd.id] = ConvertTo-RoleDefinitionEvidence -RoleDefinition $rd -ConfiguredRoles $configuredRoles -DefinitionSource $definitionSource
     }
     $script:CachedRoleDefinitions = $definitionEvidence
 
     $results = @()
+    $failedDefinitionIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    Set-CoverageState -Source 'RoleGroupMemberships' -State Complete
     foreach ($assignment in $allAssignments) {
         $definition = $definitionEvidence[$assignment.roleDefinitionId]
         if (-not $definition) {
-            Set-CoverageState -Source 'RoleDefinitions' -State Partial -Detail "No definition returned for roleDefinitionId $($assignment.roleDefinitionId)"
-            continue
+            if (-not $failedDefinitionIds.Contains([string]$assignment.roleDefinitionId)) {
+                try {
+                    $rd = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/$definitionApiVersion/roleManagement/directory/roleDefinitions/$($assignment.roleDefinitionId)"
+                    $definition = ConvertTo-RoleDefinitionEvidence -RoleDefinition $rd -ConfiguredRoles $configuredRoles -DefinitionSource "${definitionSource}ItemFallback"
+                    $definitionEvidence[$assignment.roleDefinitionId] = $definition
+                } catch {
+                    [void]$failedDefinitionIds.Add([string]$assignment.roleDefinitionId)
+                    Set-CoverageState -Source 'RoleDefinitions' -State Partial -Detail "No definition could be resolved for roleDefinitionId $($assignment.roleDefinitionId): $($_.Exception.Message)"
+                }
+            }
+            if (-not $definition) { continue }
         }
         if (-not ($definition.IsSensitiveTarget -or $definition.CanControlApplications -or $definition.CanControlServicePrincipals)) { continue }
 
@@ -1265,7 +1308,7 @@ function Invoke-RoleAudit {
     $roleAssignments = @(Get-PrivilegedRoleAssignments)
     $sensitiveRoleAssignments = @($roleAssignments | Where-Object { $_.IsSensitiveTarget })
     $allUsers = Get-AllUsers
-    $roleAssignmentEvidenceComplete = Test-AuditCoverageComplete -Sources @('RoleDefinitions', 'ActiveRoleAssignments')
+    $roleAssignmentEvidenceComplete = Test-AuditCoverageComplete -Sources @('RoleDefinitions', 'ActiveRoleAssignments', 'RoleGroupMemberships')
 
     # Group user role assignments
     $userRoles = @{}
@@ -1283,7 +1326,7 @@ function Invoke-RoleAudit {
     }
 
     $privilegedUserIds = $userRoles.Keys
-    $canClassifyNonPrivileged = Test-AuditCoverageComplete -Sources @('RoleDefinitions', 'ActiveRoleAssignments', 'Users')
+    $canClassifyNonPrivileged = Test-AuditCoverageComplete -Sources @('RoleDefinitions', 'ActiveRoleAssignments', 'RoleGroupMemberships', 'Users')
     $nonPrivilegedUsers = if ($canClassifyNonPrivileged) {
         @($allUsers | Where-Object { $_.id -notin $privilegedUserIds })
     } else {
@@ -1383,13 +1426,13 @@ function Invoke-AttackPathAnalysis {
     $directDangerousApps = @($dangerousApps | Where-Object { $_.PermissionType -eq 'Application' })
     $conditionalDangerousApps = @($dangerousApps | Where-Object { $_.PermissionType -eq 'Delegated' })
     $roleAssignments = @(Get-PrivilegedRoleAssignments)
-    $roleEvidenceComplete = Test-AuditCoverageComplete -Sources @('RoleDefinitions', 'ActiveRoleAssignments')
+    $roleEvidenceComplete = Test-AuditCoverageComplete -Sources @('RoleDefinitions', 'ActiveRoleAssignments', 'RoleGroupMemberships')
 
     # SPs with privileged directory roles
     $privilegedSPs = @($roleAssignments | Where-Object { $_.PrincipalType -eq '#microsoft.graph.servicePrincipal' -and $_.IsSensitiveTarget })
 
     if ($directDangerousApps.Count -eq 0 -and $privilegedSPs.Count -eq 0) {
-        if (Test-AuditCoverageComplete -Sources @('ServicePrincipals', 'ApplicationPermissionGrants', 'ResourcePermissionDefinitions', 'RoleDefinitions', 'ActiveRoleAssignments')) {
+        if (Test-AuditCoverageComplete -Sources @('ServicePrincipals', 'ApplicationPermissionGrants', 'ResourcePermissionDefinitions', 'RoleDefinitions', 'ActiveRoleAssignments', 'RoleGroupMemberships')) {
             Write-Host "✓ No direct application-permission or privileged-SP paths found." -ForegroundColor Green
         } else {
             Write-Host "⚠ No direct paths found in the available evidence; attack-path coverage is incomplete." -ForegroundColor Yellow
@@ -1448,7 +1491,9 @@ function Invoke-AttackPathAnalysis {
             # A reader or narrower privileged role can still have a real privilege increase.
             $existingRoles = @($roleAssignments | Where-Object { $_.PrincipalId -eq $owner.id -and $_.PrincipalType -eq '#microsoft.graph.user' } | ForEach-Object { $_.RoleName } | Select-Object -Unique)
             foreach ($app in $apps) {
-                if ($roleEvidenceComplete -and (Test-UserAlreadyEquivalentToPermission -UserId $owner.id -Permission $app.Permission -RoleAssignments $roleAssignments)) { continue }
+                # An observed equivalent role is enough to rule out a privilege increase even
+                # when unrelated role definitions or group expansion remain incomplete.
+                if (Test-UserAlreadyEquivalentToPermission -UserId $owner.id -Permission $app.Permission -RoleAssignments $roleAssignments) { continue }
                 $pathNum++
                 $spCreds = $spDirectCreds[$app.SPId]
                 $spCredCount = if ($spCreds) { @($spCreds | Where-Object { -not $_.Expired }).Count } else { 0 }
@@ -1465,7 +1510,7 @@ function Invoke-AttackPathAnalysis {
                     Severity        = $impactSeverity.ToUpperInvariant()
                     UserDisplayName = $owner.displayName
                     UserUPN         = $owner.userPrincipalName
-                    UserRole        = if (-not $roleEvidenceComplete) { 'Unknown (role evidence incomplete)' } elseif ($existingRoles.Count -gt 0) { $existingRoles -join ', ' } else { 'None of the sensitive roles evaluated' }
+                    UserRole        = if (-not $roleEvidenceComplete -and $existingRoles.Count -gt 0) { "Observed: $($existingRoles -join ', '); additional role evidence incomplete" } elseif (-not $roleEvidenceComplete) { 'Unknown (role evidence incomplete)' } elseif ($existingRoles.Count -gt 0) { $existingRoles -join ', ' } else { 'None of the sensitive roles evaluated' }
                     AppName         = $app.SPDisplayName
                     AppId           = $app.AppId
                     Permission      = $app.Permission
@@ -1527,12 +1572,13 @@ function Invoke-AttackPathAnalysis {
                 $spCredCount = if ($spCreds) { @($spCreds | Where-Object { -not $_.Expired }).Count } else { 0 }
                 $controlRoleNames = @($applicableControl | ForEach-Object { $_.RoleName } | Select-Object -Unique)
                 $targetRoleNames = @($newTargetRoles | ForEach-Object { $_.RoleName } | Select-Object -Unique)
+                $targetImpactSeverity = Get-RoleImpactSeverity -RoleAssignments $newTargetRoles
                 $pathDef = $script:AttackPathDefs | Where-Object { $_.id -eq 'ROLE_BASED_SP_CONTROL' } | Select-Object -First 1
                 $paths += [PSCustomObject]@{
                     PathNumber      = $pathNum
                     PathType        = 'Role-Based SP Control'
                     PathId          = 'ROLE_BASED_SP_CONTROL'
-                    Severity        = if ($isMitigated) { 'INFO' } elseif ($lockUnknown) { 'HIGH' } else { 'CRITICAL' }
+                    Severity        = if ($isMitigated) { 'INFO' } else { $targetImpactSeverity }
                     Exploitability  = if ($isMitigated) { 'MitigatedByAppInstanceLock' } elseif ($lockUnknown) { 'PotentialLockUnknown' } else { 'Direct' }
                     UserDisplayName = $applicableControl[0].PrincipalDisplayName
                     UserUPN         = $applicableControl[0].PrincipalUPN
@@ -1578,7 +1624,7 @@ function Invoke-AttackPathAnalysis {
 
     # ── Display Results ────────────────────────────────────────────────────
     if ($paths.Count -eq 0 -and $unownedApps.Count -eq 0) {
-        if (Test-AuditCoverageComplete -Sources @('ApplicationOwners', 'RoleDefinitions', 'ActiveRoleAssignments', 'AppInstanceLocks')) {
+        if (Test-AuditCoverageComplete -Sources @('ApplicationOwners', 'RoleDefinitions', 'ActiveRoleAssignments', 'RoleGroupMemberships', 'AppInstanceLocks')) {
             Write-Host "✓ No attack paths or confirmed unowned privileged apps found." -ForegroundColor Green
         } else {
             Write-Host "⚠ No paths found in the available evidence; attack-path coverage is incomplete." -ForegroundColor Yellow
@@ -1590,8 +1636,12 @@ function Invoke-AttackPathAnalysis {
         # Split paths by type for display
         $ownerPaths = @($paths | Where-Object { $_.PathType -eq 'App Owner Escalation' })
         $roleBasedPaths = @($paths | Where-Object { $_.PathType -eq 'Role-Based SP Control' })
+        $directPathCount = @($paths | Where-Object { $_.Exploitability -eq 'Direct' }).Count
+        $potentialPathCount = @($paths | Where-Object { $_.Exploitability -like 'Potential*' }).Count
+        $mitigatedPathCount = @($paths | Where-Object { $_.Exploitability -eq 'MitigatedByAppInstanceLock' }).Count
 
         Write-Host "Found $($paths.Count) attack path(s): $($ownerPaths.Count) App Owner Escalation, $($roleBasedPaths.Count) Role-Based SP Control" -ForegroundColor Red
+        Write-Host "  Evidence: $directPathCount direct, $potentialPathCount potential, $mitigatedPathCount blocked by app instance lock" -ForegroundColor DarkYellow
         Write-Host ""
 
         # Display App Owner Escalation paths with full box format
@@ -1601,7 +1651,7 @@ function Invoke-AttackPathAnalysis {
             Write-Host "  │  $($path.UserUPN)" -ForegroundColor White
             Write-Host "  │  Role: $($path.UserRole)" -ForegroundColor Gray
             if ($path.Exploitability -eq 'PotentialRoleUnknown') {
-                Write-Host "  │  ⚠ Potential path: current role assignments could not be read" -ForegroundColor Yellow
+                Write-Host "  │  ⚠ Potential path: additional role evidence is incomplete" -ForegroundColor Yellow
             }
             Write-Host "  │                          ↓ owns" -ForegroundColor DarkGray
             Write-Host "  │  App: `"$($path.AppName)`"$(if ($path.AppId) { " ($($path.AppId))" })" -ForegroundColor White
@@ -1688,7 +1738,7 @@ function Invoke-ShadowAdminDetection {
     $spRoleAssignments = @($roleAssignments | Where-Object { $_.PrincipalType -eq '#microsoft.graph.servicePrincipal' -and $_.IsSensitiveTarget })
 
     if ($spRoleAssignments.Count -eq 0) {
-        if (Test-AuditCoverageComplete -Sources @('RoleDefinitions', 'ActiveRoleAssignments')) {
+        if (Test-AuditCoverageComplete -Sources @('RoleDefinitions', 'ActiveRoleAssignments', 'RoleGroupMemberships')) {
             Write-Host "✓ No service principals hold configured sensitive directory roles." -ForegroundColor Green
         } else {
             Write-Host "⚠ No sensitive-role service principals were found in the available evidence; role coverage is incomplete." -ForegroundColor Yellow
@@ -1732,7 +1782,7 @@ function Invoke-ShadowAdminDetection {
     }
 
     if ($shadows.Count -eq 0) {
-        if (Test-AuditCoverageComplete -Sources @('RoleDefinitions', 'ActiveRoleAssignments', 'ServicePrincipalOwners')) {
+        if (Test-AuditCoverageComplete -Sources @('RoleDefinitions', 'ActiveRoleAssignments', 'RoleGroupMemberships', 'ServicePrincipalOwners')) {
             Write-Host "✓ No privilege-increasing SP owner paths found." -ForegroundColor Green
         } else {
             Write-Host "⚠ No shadow paths found in the available evidence; owner or role coverage is incomplete." -ForegroundColor Yellow
@@ -2178,7 +2228,7 @@ function Invoke-FullAudit {
     $summary['AttackPaths'] = "$($directAttackResults.Count) direct, $($potentialAttackResults.Count) potential, $($mitigatedAttackResults.Count) blocked by app instance lock"
 
     $shadowResults = Invoke-ShadowAdminDetection
-    $shadowRoleCoverageComplete = Test-AuditCoverageComplete -Sources @('RoleDefinitions', 'ActiveRoleAssignments')
+    $shadowRoleCoverageComplete = Test-AuditCoverageComplete -Sources @('RoleDefinitions', 'ActiveRoleAssignments', 'RoleGroupMemberships')
     $shadowOwnerCoverageComplete = @($roleResults.SPRoles).Count -eq 0 -or (Test-AuditCoverageComplete -Sources 'ServicePrincipalOwners')
     $shadowCoverageComplete = $shadowRoleCoverageComplete -and $shadowOwnerCoverageComplete
     $summary['ShadowAdmins'] = if ($shadowCoverageComplete) {
