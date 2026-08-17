@@ -5,7 +5,7 @@
 
 .DESCRIPTION
     Connects to Microsoft Entra ID via Microsoft Graph, identifies app registrations and service
-    principals with permissions equivalent to Global Administrator, and reports which users hold
+    principals with high-impact permissions, and reports which users hold
     privileged directory roles versus those who don't.
 
     Modes:
@@ -77,11 +77,11 @@ $ErrorActionPreference = 'Stop'
 
 # Hardcoded defaults — these are used if no config files exist
 $script:DefaultDangerousPermissions = @(
-    @{ name = 'RoleManagement.ReadWrite.Directory'; type = 'Application'; resourceAppId = $script:MicrosoftGraphAppId; resourceName = 'Microsoft Graph'; risk = 'Critical'; reason = 'Can assign any Entra ID role to any principal, including Global Administrator' }
-    @{ name = 'AppRoleAssignment.ReadWrite.All';    type = 'Application'; resourceAppId = $script:MicrosoftGraphAppId; resourceName = 'Microsoft Graph'; risk = 'Critical'; reason = 'Can grant itself or any app any application permission' }
-    @{ name = 'Application.ReadWrite.All';          type = 'Application'; resourceAppId = $script:MicrosoftGraphAppId; resourceName = 'Microsoft Graph'; risk = 'Critical'; reason = 'Can modify any app registration credentials and impersonate it' }
-    @{ name = 'Directory.ReadWrite.All';            type = 'Application'; resourceAppId = $script:MicrosoftGraphAppId; resourceName = 'Microsoft Graph'; risk = 'High';     reason = 'Near-full write access to all directory objects' }
-    @{ name = 'Directory.AccessAsUser.All';         type = 'Delegated';   resourceAppId = $script:MicrosoftGraphAppId; resourceName = 'Microsoft Graph'; risk = 'Critical'; reason = 'Full directory access as the signed-in user' }
+    @{ name = 'RoleManagement.ReadWrite.Directory'; type = 'Application'; resourceAppId = $script:MicrosoftGraphAppId; resourceName = 'Microsoft Graph'; risk = 'Critical'; reason = 'Can assign any Entra ID role to any principal, including Global Administrator'; attackAction = 'assign a privileged directory role to a controlled principal' }
+    @{ name = 'AppRoleAssignment.ReadWrite.All';    type = 'Application'; resourceAppId = $script:MicrosoftGraphAppId; resourceName = 'Microsoft Graph'; risk = 'Critical'; reason = 'Can grant itself or any app any application permission'; attackAction = 'grant a controlled app additional high-impact application permissions' }
+    @{ name = 'Application.ReadWrite.All';          type = 'Application'; resourceAppId = $script:MicrosoftGraphAppId; resourceName = 'Microsoft Graph'; risk = 'Critical'; reason = 'Can modify any app registration credentials and impersonate it'; attackAction = 'add credentials to another app registration and inherit that app permissions' }
+    @{ name = 'Directory.ReadWrite.All';            type = 'Application'; resourceAppId = $script:MicrosoftGraphAppId; resourceName = 'Microsoft Graph'; risk = 'High';     reason = 'Near-full write access to directory objects, subject to protected-operation restrictions'; attackAction = 'modify directory objects allowed by Directory.ReadWrite.All' }
+    @{ name = 'Directory.AccessAsUser.All';         type = 'Delegated';   resourceAppId = $script:MicrosoftGraphAppId; resourceName = 'Microsoft Graph'; risk = 'Critical'; reason = 'Full directory access as the signed-in user'; attackAction = 'act with the signed-in user permissions through Microsoft Graph' }
 )
 
 $script:DefaultPrivilegedRoles = @(
@@ -179,7 +179,7 @@ $script:DefaultAttackPaths = @(
         id          = 'UNOWNED_PRIVILEGED_APP'
         name        = 'Unowned Application with Dangerous Permissions'
         severity    = 'High'
-        description = 'An application has GA-equivalent permissions but no assigned owners — no accountability for credential rotation or access review.'
+        description = 'An application has high-impact permissions but no assigned owners — no accountability for credential rotation or access review.'
         remediation = @(
             'Assign a responsible owner to the application'
             'Review if the application is still needed'
@@ -216,6 +216,7 @@ function Initialize-Config {
                     resourceName  = if ($_.resourceName) { $_.resourceName } else { 'Microsoft Graph' }
                     risk          = $_.risk
                     reason        = $_.reason
+                    attackAction  = $_.attackAction
                 }
             })
             Write-Verbose "Loaded $(($script:DangerousPermissions).Count) dangerous permissions from config"
@@ -423,7 +424,7 @@ function Write-AuditCoverageSummary {
     if ($incomplete.Count -gt 0) {
         Write-Host ''
         Write-Host 'DATA COVERAGE: PARTIAL' -ForegroundColor DarkYellow
-        $incomplete | Format-Table -AutoSize | Out-String | Write-Host
+        $incomplete | Format-Table -Wrap | Out-String -Width 200 | Write-Host
         Write-Host '  A zero finding count is not a clean result for the sources listed above.' -ForegroundColor DarkYellow
     }
     Export-AuditCsv -Name 'DataCoverage' -Data $rows
@@ -751,7 +752,7 @@ function Get-ServicePrincipalsWithAppRoles {
     Write-Host "    Third-party (cross-tenant):$($crossTenantSPs.Count)" -ForegroundColor Gray
     if ($unknownOwnerSPs.Count -gt 0) {
         Write-Host "    Unknown owner:            $($unknownOwnerSPs.Count)" -ForegroundColor DarkYellow
-        Write-Host "    ⚠ Unknown owner apps require manual investigation — see CSV export" -ForegroundColor DarkYellow
+        Write-Host "    ⚠ Unknown owner apps require manual investigation$(if (-not $ExportPath) { ' — use -ExportPath to save the detailed list' })" -ForegroundColor DarkYellow
     }
     Write-Host "" -ForegroundColor Gray
 
@@ -840,6 +841,7 @@ function Get-ServicePrincipalsWithAppRoles {
                     ConsentType     = 'AdminConsent'
                     Risk            = $permDef.risk
                     Reason          = $permDef.reason
+                    AttackAction    = $permDef.attackAction
                     AccountEnabled  = $sp.accountEnabled
                     EntraPortalUrl  = Get-EntraAppUrl -ObjectId $sp.id -AppId $sp.appId
                 }
@@ -889,6 +891,7 @@ function Get-ServicePrincipalsWithAppRoles {
                         ConsentPrincipalId = $grant.principalId
                         Risk            = $dp.risk
                         Reason          = $dp.reason
+                        AttackAction    = $dp.attackAction
                         AccountEnabled  = $clientSP.accountEnabled
                         EntraPortalUrl  = Get-EntraAppUrl -ObjectId $clientSP.id -AppId $clientSP.appId
                     }
@@ -1262,6 +1265,7 @@ function Invoke-RoleAudit {
     $roleAssignments = @(Get-PrivilegedRoleAssignments)
     $sensitiveRoleAssignments = @($roleAssignments | Where-Object { $_.IsSensitiveTarget })
     $allUsers = Get-AllUsers
+    $roleAssignmentEvidenceComplete = Test-AuditCoverageComplete -Sources @('RoleDefinitions', 'ActiveRoleAssignments')
 
     # Group user role assignments
     $userRoles = @{}
@@ -1287,7 +1291,11 @@ function Invoke-RoleAudit {
     }
 
     # Display privileged users
-    Write-Host "USERS IN PRIVILEGED ROLES ($($userRoles.Count) users):" -ForegroundColor Green
+    if ($roleAssignmentEvidenceComplete) {
+        Write-Host "USERS IN SENSITIVE ROLES ($($userRoles.Count) users):" -ForegroundColor Green
+    } else {
+        Write-Host "SENSITIVE-ROLE USER ASSIGNMENTS OBSERVED ($($userRoles.Count) users; INCOMPLETE):" -ForegroundColor DarkYellow
+    }
     Write-Host ""
     $pUsers = $userRoles.Values | ForEach-Object {
         [PSCustomObject]@{
@@ -1361,7 +1369,7 @@ function Invoke-RoleAudit {
     }
     Export-AuditCsv -Name 'RoleAudit' -Data $exportData
 
-    return [PSCustomObject]@{ PrivilegedUsers = $userRoles; NonPrivilegedUsers = $nonPrivilegedUsers; SPRoles = $spRoles; GroupRoles = $groupRoles; RoleAssignments = $roleAssignments; SensitiveRoleAssignments = $sensitiveRoleAssignments }
+    return [PSCustomObject]@{ PrivilegedUsers = $userRoles; NonPrivilegedUsers = $nonPrivilegedUsers; SPRoles = $spRoles; GroupRoles = $groupRoles; RoleAssignments = $roleAssignments; SensitiveRoleAssignments = $sensitiveRoleAssignments; CoverageComplete = $canClassifyNonPrivileged }
 }
 
 #endregion
@@ -1375,6 +1383,7 @@ function Invoke-AttackPathAnalysis {
     $directDangerousApps = @($dangerousApps | Where-Object { $_.PermissionType -eq 'Application' })
     $conditionalDangerousApps = @($dangerousApps | Where-Object { $_.PermissionType -eq 'Delegated' })
     $roleAssignments = @(Get-PrivilegedRoleAssignments)
+    $roleEvidenceComplete = Test-AuditCoverageComplete -Sources @('RoleDefinitions', 'ActiveRoleAssignments')
 
     # SPs with privileged directory roles
     $privilegedSPs = @($roleAssignments | Where-Object { $_.PrincipalType -eq '#microsoft.graph.servicePrincipal' -and $_.IsSensitiveTarget })
@@ -1439,28 +1448,31 @@ function Invoke-AttackPathAnalysis {
             # A reader or narrower privileged role can still have a real privilege increase.
             $existingRoles = @($roleAssignments | Where-Object { $_.PrincipalId -eq $owner.id -and $_.PrincipalType -eq '#microsoft.graph.user' } | ForEach-Object { $_.RoleName } | Select-Object -Unique)
             foreach ($app in $apps) {
-                if (Test-UserAlreadyEquivalentToPermission -UserId $owner.id -Permission $app.Permission -RoleAssignments $roleAssignments) { continue }
+                if ($roleEvidenceComplete -and (Test-UserAlreadyEquivalentToPermission -UserId $owner.id -Permission $app.Permission -RoleAssignments $roleAssignments)) { continue }
                 $pathNum++
                 $spCreds = $spDirectCreds[$app.SPId]
                 $spCredCount = if ($spCreds) { @($spCreds | Where-Object { -not $_.Expired }).Count } else { 0 }
                 $lock = $appLockStatus[$appId]
 
                 $pathDef = $script:AttackPathDefs | Where-Object { $_.id -eq 'APP_OWNER_ESCALATION' } | Select-Object -First 1
+                $impactSeverity = if ($app.Risk) { [string]$app.Risk } elseif ($pathDef -and $pathDef.severity) { [string]$pathDef.severity } else { 'High' }
+                $impactReason = if ($app.Reason) { [string]$app.Reason } else { "Can use the $($app.Permission) application permission" }
+                $attackAction = if ($app.AttackAction) { [string]$app.AttackAction } else { "use the $($app.Permission) application permission" }
                 $paths += [PSCustomObject]@{
                     PathNumber      = $pathNum
                     PathType        = 'App Owner Escalation'
                     PathId          = 'APP_OWNER_ESCALATION'
-                    Severity        = 'CRITICAL'
+                    Severity        = $impactSeverity.ToUpperInvariant()
                     UserDisplayName = $owner.displayName
                     UserUPN         = $owner.userPrincipalName
-                    UserRole        = if ($existingRoles.Count -gt 0) { $existingRoles -join ', ' } else { 'None (regular user)' }
+                    UserRole        = if (-not $roleEvidenceComplete) { 'Unknown (role evidence incomplete)' } elseif ($existingRoles.Count -gt 0) { $existingRoles -join ', ' } else { 'None of the sensitive roles evaluated' }
                     AppName         = $app.SPDisplayName
                     AppId           = $app.AppId
                     Permission      = $app.Permission
                     PermissionType  = $app.PermissionType
-                    Exploitability  = 'Direct'
-                    Action          = "Add secret → authenticate as app → exploit $($app.Permission)"
-                    Result          = 'GLOBAL ADMIN EQUIVALENT ACCESS'
+                    Exploitability  = if ($roleEvidenceComplete) { 'Direct' } else { 'PotentialRoleUnknown' }
+                    Action          = "Add app credential → authenticate as app → $attackAction"
+                    Result          = $impactReason
                     SPDirectCreds   = $spCredCount
                     AppInstanceLock = if ($lock) { $lock.State } else { 'Unavailable' }
                     Remediation     = if ($pathDef) { $pathDef.remediation -join '; ' } else { 'Remove owner or reduce permissions' }
@@ -1588,18 +1600,19 @@ function Invoke-AttackPathAnalysis {
             Write-Host "  ┌─────────────────────────────────────────────────────────────────────────┐" -ForegroundColor DarkYellow
             Write-Host "  │  $($path.UserUPN)" -ForegroundColor White
             Write-Host "  │  Role: $($path.UserRole)" -ForegroundColor Gray
+            if ($path.Exploitability -eq 'PotentialRoleUnknown') {
+                Write-Host "  │  ⚠ Potential path: current role assignments could not be read" -ForegroundColor Yellow
+            }
             Write-Host "  │                          ↓ owns" -ForegroundColor DarkGray
             Write-Host "  │  App: `"$($path.AppName)`"$(if ($path.AppId) { " ($($path.AppId))" })" -ForegroundColor White
             Write-Host "  │  Permission: $($path.Permission) ($($path.PermissionType))" -ForegroundColor Yellow
             if ($path.SPDirectCreds -gt 0) {
                 Write-Host "  │  ⚠ SP has $($path.SPDirectCreds) direct credential(s) — hidden from portal" -ForegroundColor Red
             }
-            if ($path.AppInstanceLock -in @('Disabled', 'NotConfigured', 'EnabledButOAuthCredentialsNotLocked')) {
-                Write-Host "  │  ⚠ App Instance Lock: Disabled — SP creds can be added by owners" -ForegroundColor Yellow
-            }
+            Write-Host "  │  App Instance Lock: $($path.AppInstanceLock) — does not block app-registration owner credentials" -ForegroundColor DarkGray
             Write-Host "  │                          ↓ can exploit" -ForegroundColor DarkGray
             Write-Host "  │  Action: $($path.Action)" -ForegroundColor Red
-            Write-Host "  │  Result: $($path.Result)" -ForegroundColor Red
+            Write-Host "  │  Impact: $($path.Result)" -ForegroundColor Red
             Write-Host "  └─────────────────────────────────────────────────────────────────────────┘" -ForegroundColor DarkYellow
 
             $pathDef = $script:AttackPathDefs | Where-Object { $_.id -eq 'APP_OWNER_ESCALATION' } | Select-Object -First 1
@@ -2149,16 +2162,30 @@ function Invoke-FullAudit {
     $summary['PermissionAudit'] = "$($permResults.Count) configured dangerous permission grant(s)"
 
     $roleResults = Invoke-RoleAudit
-    $summary['RoleAudit'] = "$($roleResults.PrivilegedUsers.Count) users with sensitive-role assignments, $(($roleResults.NonPrivilegedUsers | Measure-Object).Count) confirmed without"
+    $roleCoverageComplete = [bool]$roleResults.CoverageComplete
+    $summary['RoleAudit'] = if ($roleCoverageComplete) {
+        "$($roleResults.PrivilegedUsers.Count) users with sensitive-role assignments, $(($roleResults.NonPrivilegedUsers | Measure-Object).Count) confirmed without"
+    } else {
+        "Incomplete — $($roleResults.PrivilegedUsers.Count) sensitive-role user assignment(s) observed; other users not classified"
+    }
 
     $attackResults = Invoke-AttackPathAnalysis
     $directAttackResults = @($attackResults | Where-Object { $_.Exploitability -eq 'Direct' })
-    $potentialAttackResults = @($attackResults | Where-Object { $_.Exploitability -eq 'PotentialLockUnknown' })
+    $potentialAttackResults = @($attackResults | Where-Object { $_.Exploitability -like 'Potential*' })
+    $potentialLockResults = @($attackResults | Where-Object { $_.Exploitability -eq 'PotentialLockUnknown' })
+    $potentialRoleResults = @($attackResults | Where-Object { $_.Exploitability -eq 'PotentialRoleUnknown' })
     $mitigatedAttackResults = @($attackResults | Where-Object { $_.Exploitability -eq 'MitigatedByAppInstanceLock' })
     $summary['AttackPaths'] = "$($directAttackResults.Count) direct, $($potentialAttackResults.Count) potential, $($mitigatedAttackResults.Count) blocked by app instance lock"
 
     $shadowResults = Invoke-ShadowAdminDetection
-    $summary['ShadowAdmins'] = "$($shadowResults.Count) shadow admin detected"
+    $shadowRoleCoverageComplete = Test-AuditCoverageComplete -Sources @('RoleDefinitions', 'ActiveRoleAssignments')
+    $shadowOwnerCoverageComplete = @($roleResults.SPRoles).Count -eq 0 -or (Test-AuditCoverageComplete -Sources 'ServicePrincipalOwners')
+    $shadowCoverageComplete = $shadowRoleCoverageComplete -and $shadowOwnerCoverageComplete
+    $summary['ShadowAdmins'] = if ($shadowCoverageComplete) {
+        "$($shadowResults.Count) shadow admin detected"
+    } else {
+        "Incomplete — $($shadowResults.Count) shadow admin relationship(s) observed"
+    }
 
     $staleResults = Invoke-StalePrivilegeDetection
     $summary['StalePrivilege'] = if ($script:StalePrivilegeDataAvailable -eq $false) {
@@ -2180,9 +2207,9 @@ function Invoke-FullAudit {
     Write-Banner "FULL AUDIT SUMMARY"
 
     Write-Host "  Permission Audit:      $($summary['PermissionAudit'])" -ForegroundColor $(if ($permResults.Count -gt 0) { 'Yellow' } else { 'Green' })
-    Write-Host "  Role Audit:            $($summary['RoleAudit'])" -ForegroundColor Gray
+    Write-Host "  Role Audit:            $($summary['RoleAudit'])" -ForegroundColor $(if ($roleCoverageComplete) { 'Gray' } else { 'DarkYellow' })
     Write-Host "  Attack Paths:          $($summary['AttackPaths'])" -ForegroundColor $(if ($directAttackResults.Count -gt 0) { 'Red' } elseif ($potentialAttackResults.Count -gt 0 -or $mitigatedAttackResults.Count -gt 0) { 'DarkYellow' } else { 'Green' })
-    Write-Host "  Shadow Admins:         $($summary['ShadowAdmins'])" -ForegroundColor $(if ($shadowResults.Count -gt 0) { 'Red' } else { 'Green' })
+    Write-Host "  Shadow Admins:         $($summary['ShadowAdmins'])" -ForegroundColor $(if (-not $shadowCoverageComplete) { 'DarkYellow' } elseif ($shadowResults.Count -gt 0) { 'Red' } else { 'Green' })
     Write-Host "  Stale Privilege:       $($summary['StalePrivilege'])" -ForegroundColor $(if ($script:StalePrivilegeDataAvailable -eq $false) { 'DarkYellow' } elseif ($staleResults.Count -gt 0) { 'Yellow' } else { 'Green' })
     Write-Host "  Consent Risk:          $($summary['ConsentRisk'])" -ForegroundColor $(if ($criticalConsent -gt 0) { 'Yellow' } else { 'Green' })
     Write-Host "  Credential Hygiene:    $($summary['CredentialHygiene'])" -ForegroundColor $(if ($secretApps -gt 0 -or $spCredApps -gt 0) { 'Yellow' } else { 'Green' })
@@ -2213,8 +2240,11 @@ function Invoke-FullAudit {
     if ($directAttackResults.Count -gt 0) {
         $actions += "Remove or constrain the control relationships behind $($directAttackResults.Count) exploitable app path(s)"
     }
-    if ($potentialAttackResults.Count -gt 0) {
-        $actions += "Verify app instance lock for $($potentialAttackResults.Count) potential SP-control path(s) whose lock state is not locally observable"
+    if ($potentialLockResults.Count -gt 0) {
+        $actions += "Verify app instance lock for $($potentialLockResults.Count) potential SP-control path(s) whose lock state is not locally observable"
+    }
+    if ($potentialRoleResults.Count -gt 0) {
+        $actions += "Complete role evidence and validate $($potentialRoleResults.Count) potential app-owner path(s)"
     }
     if ($criticalConsent -gt 0) {
         $actions += 'Disable user consent or restrict to verified publishers'

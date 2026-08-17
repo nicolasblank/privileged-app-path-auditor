@@ -2,7 +2,7 @@
 
 > **Version 0.5.2** · **[Roadmap](ROADMAP.md)**
 
-A PowerShell tool that maps privilege escalation attack paths through Entra ID application ownership. If a regular user owns an app registration that has `RoleManagement.ReadWrite.Directory`, `AppRoleAssignment.ReadWrite.All`, or another Global Admin-equivalent permission, that user can add a secret to the app, authenticate as it, and **silently become a Global Administrator** — no alerts, no approval, no MFA. This tool finds those paths in the evidence Microsoft Graph makes available and tells you when that evidence is incomplete.
+A PowerShell tool that maps high-impact access paths through Entra ID application ownership. An app owner can add a credential, authenticate as the app, and use its granted application permissions. Some permissions—such as `RoleManagement.ReadWrite.Directory` or `AppRoleAssignment.ReadWrite.All`—can lead to Global Administrator access; others, such as `Directory.ReadWrite.All`, expose a different but still serious set of directory changes. The auditor reports the specific impact and tells you when Microsoft Graph evidence is incomplete.
 
 It also detects **role-based SP control** by reading the current capabilities of built-in and custom roles, **SP-level credentials** hidden from the Entra portal, **unowned home-tenant apps** with no accountability, **app instance property lock** status, shadow admins, stale high-privilege apps, credential hygiene issues, and consent policy weaknesses — all in a single script with zero cost and no dependencies beyond the Microsoft Graph PowerShell SDK.
 
@@ -83,7 +83,7 @@ This release adds four new detection capabilities based on [Andy Robbins' (Spect
 | **Role-Based SP Control** | Detects users with Application Administrator or Cloud Application Administrator who can add secrets to *any* SP in the tenant — including SPs with Global Admin. This is the most common real-world escalation to GA. |
 | **SP-Level Credentials** | Queries credentials added directly to the service principal object (`passwordCredentials`, `keyCredentials`). These are **not visible in the Entra portal** app registration blade and are a known persistence technique. |
 | **App Instance Property Lock** | Checks `servicePrincipalLockConfiguration` on each application. When disabled, SP owners can inject credentials directly into the SP object. |
-| **Unowned Privileged Apps** | Flags apps with GA-equivalent permissions that have zero owners — no accountability for credential rotation or access review. |
+| **Unowned Privileged Apps** | Flags apps with high-impact permissions that have zero owners — no accountability for credential rotation or access review. |
 
 ## Prerequisites
 
@@ -103,8 +103,8 @@ Install-Module Microsoft.Graph.Identity.SignIns -Scope CurrentUser
 
 - **Entra ID account** with one of these roles:
   - Global Reader (recommended — least privilege for full read access)
-  - Application Administrator
   - Directory Reader + Security Reader
+  - A custom read-only role that includes the required directory, application, policy, and audit-log read actions
 
 ### Required Graph Scopes
 
@@ -126,7 +126,7 @@ All read-only. The tool never modifies your tenant.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `-Mode` | String | *(required)* | Audit mode to run — see table below |
+| `-Mode` | String | `Full` | Audit mode to run — see table below |
 | `-ExportPath` | String | *(none)* | Directory for CSV export. Created if it doesn't exist |
 | `-InactiveDays` | Int | `90` | Days of inactivity before an app is flagged as stale |
 | `-ConfigPath` | String | `./config` | Path to config directory. Falls back to built-in defaults if missing |
@@ -198,7 +198,6 @@ One CSV per mode is created in the export directory:
 | `UserConsentGrants.csv` | ConsentRisk (complete grant list; console may be truncated) | — |
 | `CredentialHygiene.csv` | CredentialHygiene | App link |
 | `DataCoverage.csv` | Any mode | — |
-| `FullAuditSummary.csv` | Full | — |
 | `FullAuditSummary.csv` | Full (overall results, risk score, top actions) | — |
 
 `Summary.csv` contains the service principal classification breakdown (total, Microsoft first-party, home tenant, third-party, unknown owner, and how many were scanned). It is written by any mode that queries service principals.
@@ -308,12 +307,12 @@ For each row in `AttackPaths.csv`:
    | Option | When to Use | How |
    |---|---|---|
    | **Remove the owner** | The user doesn't need ownership. This is the fastest fix. | Entra portal → Enterprise app → Owners → Remove |
-   | **Reduce the permission** | The app doesn't need a GA-equivalent permission. Replace with a least-privilege alternative. | Entra portal → App registration → API permissions → Remove and re-grant with narrower scope |
+   | **Reduce the permission** | The app doesn't need the reported high-impact permission. Replace it with a least-privilege alternative. | Entra portal → App registration → API permissions → Remove and re-grant with narrower scope |
    | **Both** | Ideal for maximum risk reduction | Remove the owner **and** reduce the permission |
 
 5. **Apply compensating controls** — if neither removal is feasible (e.g. production app with a legitimate owner):
    - Enable **Conditional Access for workload identities** on the service principal to require a compliant network or block token issuance outside trusted locations
-   - Configure **app instance lock** to prevent credential changes without admin approval
+   - For role-based service-principal credential paths, configure **app instance lock**. It does not block an app-registration owner from adding credentials to the application object
    - Set up **alerts** on credential additions via Azure Monitor or Microsoft Sentinel
 
 6. **Verify the fix** — re-run the audit in AttackPath mode:
@@ -561,13 +560,14 @@ Found 2 attack path(s):
 
   ┌─────────────────────────────────────────────────────────────────────────┐
   │  john.doe@contoso.com
-  │  Role: None (regular user)
+  │  Role: None of the sensitive roles evaluated
   │                          ↓ owns
   │  App: "Legacy Migration Tool" (a1b2c3d4-e5f6-7890-abcd-ef1234567890)
   │  Permission: RoleManagement.ReadWrite.Directory (Application)
   │                          ↓ can exploit
-  │  Action: Add secret → authenticate as app → assign any role
-  │  Result: GLOBAL ADMIN EQUIVALENT ACCESS
+  │  App Instance Lock: NotConfigured — does not block app-registration owner credentials
+  │  Action: Add app credential → authenticate as app → assign a privileged directory role
+  │  Impact: Can assign any Entra ID role to any principal, including Global Administrator
   └─────────────────────────────────────────────────────────────────────────┘
 
   Remediation:
@@ -581,13 +581,14 @@ Found 2 attack path(s):
 
   ┌─────────────────────────────────────────────────────────────────────────┐
   │  jane.smith@contoso.com
-  │  Role: None (regular user)
+  │  Role: None of the sensitive roles evaluated
   │                          ↓ owns
   │  App: "HR Sync Service" (b2c3d4e5-f6a7-8901-bcde-f12345678901)
   │  Permission: AppRoleAssignment.ReadWrite.All (Application)
   │                          ↓ can exploit
-  │  Action: Add secret → authenticate as app → grant itself any permission
-  │  Result: GLOBAL ADMIN EQUIVALENT ACCESS
+  │  App Instance Lock: NotConfigured — does not block app-registration owner credentials
+  │  Action: Add app credential → authenticate as app → grant a controlled app additional permissions
+  │  Impact: Can grant itself or any app any application permission
   └─────────────────────────────────────────────────────────────────────────┘
 
   Remediation:
@@ -722,8 +723,8 @@ Runs all modes sequentially and produces a summary:
 ║  FULL AUDIT SUMMARY                                                          ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
-  Permission Audit:      4 apps with GA-equivalent permissions
-  Role Audit:            7 users in privileged roles, 243 not
+  Permission Audit:      4 configured dangerous permission grants
+  Role Audit:            7 users with sensitive-role assignments, 243 confirmed without
   Attack Paths:          2 direct, 1 potential, 1 blocked by app instance lock
   Shadow Admins:         1 shadow admin detected
   Stale Privilege:       3 dormant high-privilege apps
@@ -731,6 +732,7 @@ Runs all modes sequentially and produces a summary:
   Credential Hygiene:    2 high-privilege apps using secrets
 
   OVERALL RISK:          ██████████░░░░░░░░░░  HIGH
+  DATA COVERAGE:         COMPLETE
 
   Top 3 Actions:
     1. Remove or constrain the control relationships behind 2 exploitable app paths
@@ -813,7 +815,7 @@ The tool works out of the box with zero configuration. All dangerous permissions
 
 | File | Purpose |
 |---|---|
-| `config/dangerous-permissions.json` | Permissions flagged as GA-equivalent |
+| `config/dangerous-permissions.json` | High-impact permissions, their severity, and their specific effect |
 | `config/privileged-roles.json` | Explicit sensitive-target and fallback role policy |
 | `config/audit-config.json` | Thresholds, filters, and output settings |
 | `config/attack-paths.json` | Attack path definitions and remediation guidance |

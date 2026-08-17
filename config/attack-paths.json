@@ -1,6 +1,6 @@
 {
   "$schema": "./schema/attack-paths.schema.json",
-  "description": "Attack path definitions and remediation guidance. Each path describes how an unprivileged user can escalate to Global Administrator-equivalent access through Entra ID misconfigurations.",
+  "description": "Attack path definitions and remediation guidance. Paths describe how an existing control relationship can expose additional high-impact Entra ID access.",
   "version": "0.5.2",
   "lastUpdated": "2026-08-17",
   "paths": [
@@ -188,9 +188,9 @@
       "id": "UNOWNED_PRIVILEGED_APP",
       "name": "Unowned Application with Dangerous Permissions",
       "severity": "High",
-      "description": "An application has Global Admin-equivalent permissions but no assigned owners. Without an owner, there is no accountability for credential rotation, access reviews, or lifecycle management. If credentials exist, they may be stale and at risk of exploitation.",
+      "description": "An application has high-impact permissions but no assigned owners. Without an owner, there is no accountability for credential rotation, access reviews, or lifecycle management. If credentials exist, they may be stale and at risk of exploitation.",
       "chain": [
-        "Application has GA-equivalent permissions",
+        "Application has high-impact permissions",
         "No owners assigned to the application",
         "No accountability for credential rotation",
         "Credentials may be stale or compromised",

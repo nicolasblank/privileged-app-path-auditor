@@ -294,11 +294,13 @@ Describe 'Attack-path regression fixture' {
         Mock Export-AuditCsv {}
         Mock Get-ServicePrincipalsWithAppRoles {
             return @(
-                [PSCustomObject]@{ SPId = 'danger-sp'; SPDisplayName = 'Danger App'; AppId = 'danger-app'; AppTenantType = 'HomeTenant'; Permission = 'Application.ReadWrite.All'; PermissionType = 'Application' },
+                [PSCustomObject]@{ SPId = 'danger-sp'; SPDisplayName = 'Danger App'; AppId = 'danger-app'; AppTenantType = 'HomeTenant'; Permission = 'Application.ReadWrite.All'; PermissionType = 'Application'; Risk = 'Critical'; Reason = 'Can modify app credentials'; AttackAction = 'add credentials to another app' },
                 [PSCustomObject]@{ SPId = 'danger-sp'; SPDisplayName = 'Danger App'; AppId = 'danger-app'; AppTenantType = 'HomeTenant'; Permission = 'Directory.AccessAsUser.All'; PermissionType = 'Delegated' }
             )
         }
         Mock Get-PrivilegedRoleAssignments {
+            Set-CoverageState -Source 'RoleDefinitions' -State Complete
+            Set-CoverageState -Source 'ActiveRoleAssignments' -State Complete
             return @(
                 [PSCustomObject]@{ PrincipalId = 'reader'; PrincipalType = '#microsoft.graph.user'; PrincipalDisplayName = 'Reader'; PrincipalUPN = 'reader@contoso.test'; RoleDefinitionId = 'rd-reader'; RoleTemplateId = '1fe13547-53f6-408d-ac04-7f8eed167b38'; RoleName = 'AI Reader'; IsSensitiveTarget = $true; CanControlServicePrincipals = $false },
                 [PSCustomObject]@{ PrincipalId = 'ga'; PrincipalType = '#microsoft.graph.user'; PrincipalDisplayName = 'GA'; PrincipalUPN = 'ga@contoso.test'; RoleDefinitionId = 'rd-ga'; RoleTemplateId = '62e90394-69f5-4237-9190-012177145e10'; RoleName = 'Global Administrator'; IsSensitiveTarget = $true; CanControlServicePrincipals = $false },
@@ -331,8 +333,48 @@ Describe 'Attack-path regression fixture' {
         @($result | Where-Object PathType -eq 'App Owner Escalation').Count | Should -Be 1
         ($result | Where-Object PathType -eq 'App Owner Escalation').UserUPN | Should -Be 'reader@contoso.test'
         ($result | Where-Object PathType -eq 'App Owner Escalation').PermissionType | Should -Be 'Application'
+        ($result | Where-Object PathType -eq 'App Owner Escalation').Severity | Should -Be 'CRITICAL'
+        ($result | Where-Object PathType -eq 'App Owner Escalation').Result | Should -Be 'Can modify app credentials'
         ($result | Where-Object { $_.PathType -eq 'Role-Based SP Control' -and $_.UserUPN -eq 'operator@contoso.test' -and $_.AppId -eq 'target-app' }).Exploitability | Should -Be 'MitigatedByAppInstanceLock'
         ($result | Where-Object { $_.PathType -eq 'Role-Based SP Control' -and $_.UserUPN -eq 'appoperator@contoso.test' -and $_.AppId -eq 'home-target-app' }).Exploitability | Should -Be 'Direct'
+    }
+
+    It 'marks an owner path potential and preserves permission impact when role evidence is unavailable' {
+        Mock Write-Banner {}
+        Mock Write-Host {}
+        Mock Write-SectionDivider {}
+        Mock Write-Recommendation {}
+        Mock Write-Reference {}
+        Mock Export-AuditCsv {}
+        Mock Get-ServicePrincipalsWithAppRoles {
+            return @([PSCustomObject]@{
+                SPId = 'directory-sp'; SPDisplayName = 'Directory Writer'; AppId = 'directory-app'; AppTenantType = 'HomeTenant'
+                Permission = 'Directory.ReadWrite.All'; PermissionType = 'Application'; Risk = 'High'
+                Reason = 'Near-full write access to directory objects, subject to protected-operation restrictions'
+                AttackAction = 'modify directory objects allowed by Directory.ReadWrite.All'
+            })
+        }
+        Mock Get-PrivilegedRoleAssignments {
+            Set-CoverageState -Source 'RoleDefinitions' -State Unavailable -Detail 'denied'
+            Set-CoverageState -Source 'ActiveRoleAssignments' -State Unavailable -Detail 'denied'
+            return @()
+        }
+        Mock Get-ApplicationOwners {
+            return @{ 'directory-app' = [PSCustomObject]@{ Status = 'Complete'; Owners = @(
+                [PSCustomObject]@{ id = 'owner'; displayName = 'Owner'; userPrincipalName = 'owner@contoso.test' }
+            ) } }
+        }
+        Mock Get-SPDirectCredentials { return @{} }
+        Mock Get-AppInstanceLockStatus { return @{ 'directory-app' = [PSCustomObject]@{ State = 'Disabled'; IsCredentialLocked = $false } } }
+        $script:CachedServicePrincipals = @([PSCustomObject]@{ id = 'directory-sp'; appId = 'directory-app'; appOwnerOrganizationId = 'tenant-home' })
+
+        $result = @(Invoke-AttackPathAnalysis)
+        $result.Count | Should -Be 1
+        $result[0].Exploitability | Should -Be 'PotentialRoleUnknown'
+        $result[0].UserRole | Should -Match '^Unknown'
+        $result[0].Severity | Should -Be 'HIGH'
+        $result[0].Result | Should -Be 'Near-full write access to directory objects, subject to protected-operation restrictions'
+        $result[0].Result | Should -Not -Match 'GLOBAL ADMIN'
     }
 
     It 'does not query application owners or report unowned status for a third-party SP' {
@@ -364,6 +406,7 @@ Describe 'Configuration behavior' {
         $script:AuditConfig.credentialHygiene.preferredCredentialTypes | Should -Contain 'Federated'
         $script:AuditConfig.credentialHygiene.riskyCredentialTypes | Should -Contain 'SP-Secret'
         $script:DangerousPermissions[0].resourceAppId | Should -Be $script:MicrosoftGraphAppId
+        $script:DangerousPermissions[0].attackAction | Should -Not -BeNullOrEmpty
     }
 
     It 'honors intentionally empty configured lists instead of restoring defaults' {
