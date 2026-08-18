@@ -2,7 +2,7 @@
 
 This roadmap describes the intended direction of Privileged App Path Auditor. It is a statement of priorities, not a commitment to specific delivery dates.
 
-Feedback, Microsoft Entra platform changes, and real-world findings may change the order of planned work.
+Feedback, Microsoft Entra platform changes, how much time I have and real-world findings may change the order of planned work, but feedback is critical. Please keep it coming.
 
 ## Current release
 
