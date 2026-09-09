@@ -1,8 +1,8 @@
 {
   "$schema": "./schema/audit-config.schema.json",
   "description": "Runtime configuration for the Privileged App Path Auditor. These settings control thresholds, exclusions, and behavior. Override values here to customize for your environment.",
-  "version": "0.5.2",
-  "lastUpdated": "2026-08-17",
+  "version": "0.6.0",
+  "lastUpdated": "2026-09-09",
   "stalePrivilege": {
     "inactiveDays": 90,
     "description": "Number of days without a sign-in before an app is considered stale"
@@ -15,14 +15,14 @@
   },
   "consentRisk": {
     "flagUserConsentedApps": true,
-    "description": "When true, ConsentRisk mode will enumerate apps that received user consent (not admin consent)"
+    "description": "When true, ConsentRisk mode enumerates single-user delegated permission grants. The principal is the beneficiary; the grant does not identify who approved consent."
   },
   "credentialHygiene": {
     "preferredCredentialTypes": ["Certificate", "Federated"],
     "riskyCredentialTypes": ["Secret", "SP-Secret", "SP-Certificate"],
     "flagMultipleCredentials": true,
     "flagExpiredCredentials": true,
-    "description": "Credential type names match report values. Any direct SP credential is treated as critical because it is hidden from the app-registration credential view."
+    "description": "Credential type names match report values. Any currently valid direct SP credential triggers the special critical classification because it is stored separately from the app-registration credential view. Future and expired credentials remain inventory and can still trigger configured hygiene rules."
   },
   "output": {
     "maxUsersInRoleAuditList": 500,

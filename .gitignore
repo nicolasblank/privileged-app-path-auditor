@@ -1,5 +1,6 @@
 # Audit results output
 audit-results/
+audit-results-old/
 
 # PowerShell module artifacts
 *.psm1.bak
@@ -20,6 +21,7 @@ Desktop.ini
 
 # Logs
 *.log
+testResults.xml
 
 # User-specific config overrides (uncommitted)
 config/local-*.json

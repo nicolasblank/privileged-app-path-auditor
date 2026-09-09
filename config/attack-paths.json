@@ -1,7 +1,7 @@
 {
   "$schema": "./schema/attack-paths.schema.json",
   "description": "Attack path definitions and remediation guidance. Paths describe how an existing control relationship can expose additional high-impact Entra ID access.",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "lastUpdated": "2026-08-17",
   "paths": [
     {

@@ -1,7 +1,7 @@
 {
   "$schema": "./schema/privileged-roles.schema.json",
   "description": "Fallback sensitive-role policy used alongside live Microsoft Graph role definitions. Runtime isPrivileged and rolePermissions data handles current built-in and custom roles; this list supplies explicit targets and a fallback when preview classification is unavailable.",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "lastUpdated": "2026-08-17",
   "reference": "https://learn.microsoft.com/entra/identity/role-based-access-control/permissions-reference",
   "roles": [

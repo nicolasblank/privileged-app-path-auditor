@@ -3,11 +3,11 @@ BeforeAll {
     $script:repoRoot = Split-Path $script:scriptPath -Parent
     $tokens = $null
     $script:parseErrors = $null
-    [System.Management.Automation.Language.Parser]::ParseFile(
+    $script:ast = [System.Management.Automation.Language.Parser]::ParseFile(
         $script:scriptPath,
         [ref]$tokens,
         [ref]$script:parseErrors
-    ) | Out-Null
+    )
 
     . $script:scriptPath
 
@@ -32,8 +32,15 @@ Describe 'Script and repository contracts' {
         $script:parseErrors | Should -BeNullOrEmpty
     }
 
-    It 'reports version 0.5.2' {
-        $script:Version | Should -Be '0.5.2'
+    It 'reports version 0.6.0' {
+        $script:Version | Should -Be '0.6.0'
+    }
+
+    It 'keeps checked-in configuration versions aligned with the script' {
+        foreach ($configFile in Get-ChildItem (Join-Path $script:repoRoot 'config') -Filter '*.json' | Where-Object Name -ne 'MicrosoftApps.json') {
+            $config = Get-Content $configFile.FullName -Raw | ConvertFrom-Json
+            $config.version | Should -Be $script:Version -Because "$($configFile.Name) is part of the same release contract"
+        }
     }
 
     It 'can be dot-sourced without executing Graph connection code' {
@@ -54,6 +61,64 @@ Describe 'Script and repository contracts' {
         $workflow | Should -Match 'ubuntu-latest'
         $workflow | Should -Match 'windows-latest'
         $workflow | Should -Match 'macos-latest'
+    }
+
+    It 'keeps every direct Microsoft Graph request read-only' {
+        $graphCommands = @($script:ast.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.CommandAst] -and
+                $node.GetCommandName() -eq 'Invoke-MgGraphRequest'
+        }, $true))
+
+        $graphCommands.Count | Should -BeGreaterThan 0
+        foreach ($command in $graphCommands) {
+            $command.Extent.Text | Should -Match '(?i)-Method\s+GET(?:\s|$)' -Because $command.Extent.Text
+            $command.Extent.Text | Should -Not -Match '(?i)-Method\s+(POST|PUT|PATCH|DELETE)'
+        }
+    }
+
+    It 'requests only the documented read-only delegated scopes' {
+        $source = Get-Content $script:scriptPath -Raw
+        $block = [regex]::Match($source, '(?s)function Connect-GraphIfNeeded\s*\{.*?\$requiredScopes\s*=\s*@\((.*?)\)')
+        $block.Success | Should -BeTrue
+        $scopes = @([regex]::Matches($block.Groups[1].Value, "'([^']+)'") | ForEach-Object { $_.Groups[1].Value })
+        $scopes | Should -Be @(
+            'Application.Read.All'
+            'Directory.Read.All'
+            'RoleManagement.Read.Directory'
+            'AuditLog.Read.All'
+            'Policy.Read.All'
+        )
+        @($scopes | Where-Object { $_ -match '(?i)ReadWrite|\.Write\.|AccessAsUser' }).Count | Should -Be 0
+    }
+
+    It 'keeps local Markdown links valid' {
+        foreach ($markdownFile in Get-ChildItem $script:repoRoot -Recurse -Filter '*.md' | Where-Object FullName -NotMatch '[\\/]\.git[\\/]') {
+            $content = Get-Content $markdownFile.FullName -Raw
+            foreach ($match in [regex]::Matches($content, '\[[^\]]+\]\(([^)]+)\)')) {
+                $target = $match.Groups[1].Value
+                if ($target -match '^(?i:https?://|mailto:|#)') { continue }
+                $pathOnly = ($target -split '#', 2)[0]
+                if (-not $pathOnly) { continue }
+                $resolved = Join-Path $markdownFile.DirectoryName $pathOnly
+                Test-Path $resolved | Should -BeTrue -Because "$($markdownFile.Name) links to $target"
+            }
+        }
+    }
+
+    It 'keeps the operator README focused on the evidence-backed product claim' {
+        $readme = Get-Content (Join-Path $script:repoRoot 'README.md') -Raw
+        $readme | Should -Match 'Who can gain additional privilege through an Entra application'
+        $readme | Should -Match 'Invoke-PrivilegedAudit\.ps1 -Mode AttackPath'
+        $readme | Should -Not -Match '(?i)none of (the|them|these) (other )?tools'
+        $readme | Should -Not -Match '(?i)works in every (Entra ID )?tenant'
+    }
+
+    It 'keeps portable agent guidance small and canonical' {
+        $agentLines = @(Get-Content (Join-Path $script:repoRoot 'AGENTS.md'))
+        $agentLines.Count | Should -BeLessOrEqual 90
+        (Get-Content (Join-Path $script:repoRoot 'CLAUDE.md') -Raw).Trim() | Should -Be '@AGENTS.md'
+        (Get-Content (Join-Path $script:repoRoot 'GEMINI.md') -Raw).Trim() | Should -Be '@./AGENTS.md'
     }
 
     It 'includes the 2026 privileged-role classification changes in the fallback policy' {
@@ -219,14 +284,14 @@ Describe 'Current and custom role handling' {
 
     It 'uses permission-specific existing-role equivalence rather than any privileged-role membership' {
         $assignments = @(
-            [PSCustomObject]@{ PrincipalId = 'pra'; PrincipalType = '#microsoft.graph.user'; RoleTemplateId = 'e8611ab8-c189-46e8-94e1-60213ab1f814' },
-            [PSCustomObject]@{ PrincipalId = 'reader'; PrincipalType = '#microsoft.graph.user'; RoleTemplateId = '1fe13547-53f6-408d-ac04-7f8eed167b38' },
-            [PSCustomObject]@{ PrincipalId = 'apps'; PrincipalType = '#microsoft.graph.user'; RoleTemplateId = '9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3' }
+            [PSCustomObject]@{ PrincipalId = 'pra'; PrincipalType = '#microsoft.graph.user'; RoleTemplateId = 'e8611ab8-c189-46e8-94e1-60213ab1f814'; DirectoryScopeId = '/'; AppScopeId = $null },
+            [PSCustomObject]@{ PrincipalId = 'reader'; PrincipalType = '#microsoft.graph.user'; RoleTemplateId = '1fe13547-53f6-408d-ac04-7f8eed167b38'; DirectoryScopeId = '/'; AppScopeId = $null },
+            [PSCustomObject]@{ PrincipalId = 'apps'; PrincipalType = '#microsoft.graph.user'; RoleTemplateId = '9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3'; DirectoryScopeId = '/'; AppScopeId = $null }
         )
-        Test-UserAlreadyEquivalentToPermission 'pra' 'RoleManagement.ReadWrite.Directory' $assignments | Should -BeTrue
-        Test-UserAlreadyEquivalentToPermission 'reader' 'RoleManagement.ReadWrite.Directory' $assignments | Should -BeFalse
-        Test-UserAlreadyEquivalentToPermission 'apps' 'Application.ReadWrite.All' $assignments | Should -BeTrue
-        Test-UserAlreadyEquivalentToPermission 'apps' 'RoleManagement.ReadWrite.Directory' $assignments | Should -BeFalse
+        Test-UserAlreadyEquivalentToPermission 'pra' 'RoleManagement.ReadWrite.Directory' $assignments -ResourceAppId $script:MicrosoftGraphAppId | Should -BeTrue
+        Test-UserAlreadyEquivalentToPermission 'reader' 'RoleManagement.ReadWrite.Directory' $assignments -ResourceAppId $script:MicrosoftGraphAppId | Should -BeFalse
+        Test-UserAlreadyEquivalentToPermission 'apps' 'Application.ReadWrite.All' $assignments -ResourceAppId $script:MicrosoftGraphAppId | Should -BeTrue
+        Test-UserAlreadyEquivalentToPermission 'apps' 'RoleManagement.ReadWrite.Directory' $assignments -ResourceAppId $script:MicrosoftGraphAppId | Should -BeFalse
     }
 
     It 'uses the reachable role tier for role-control path severity' {
@@ -305,8 +370,8 @@ Describe 'Attack-path regression fixture' {
         Mock Export-AuditCsv {}
         Mock Get-ServicePrincipalsWithAppRoles {
             return @(
-                [PSCustomObject]@{ SPId = 'danger-sp'; SPDisplayName = 'Danger App'; AppId = 'danger-app'; AppTenantType = 'HomeTenant'; Permission = 'Application.ReadWrite.All'; PermissionType = 'Application'; Risk = 'Critical'; Reason = 'Can modify app credentials'; AttackAction = 'add credentials to another app' },
-                [PSCustomObject]@{ SPId = 'danger-sp'; SPDisplayName = 'Danger App'; AppId = 'danger-app'; AppTenantType = 'HomeTenant'; Permission = 'Directory.AccessAsUser.All'; PermissionType = 'Delegated' }
+                [PSCustomObject]@{ SPId = 'danger-sp'; SPDisplayName = 'Danger App'; AppId = 'danger-app'; AppTenantType = 'HomeTenant'; ResourceAppId = $script:MicrosoftGraphAppId; Permission = 'Application.ReadWrite.All'; PermissionType = 'Application'; Risk = 'Critical'; Reason = 'Can modify app credentials'; AttackAction = 'add credentials to another app' },
+                [PSCustomObject]@{ SPId = 'danger-sp'; SPDisplayName = 'Danger App'; AppId = 'danger-app'; AppTenantType = 'HomeTenant'; ResourceAppId = $script:MicrosoftGraphAppId; Permission = 'Directory.AccessAsUser.All'; PermissionType = 'Delegated' }
             )
         }
         Mock Get-PrivilegedRoleAssignments {
@@ -314,16 +379,16 @@ Describe 'Attack-path regression fixture' {
             Set-CoverageState -Source 'ActiveRoleAssignments' -State Complete
             Set-CoverageState -Source 'RoleGroupMemberships' -State Complete
             return @(
-                [PSCustomObject]@{ PrincipalId = 'reader'; PrincipalType = '#microsoft.graph.user'; PrincipalDisplayName = 'Reader'; PrincipalUPN = 'reader@contoso.test'; RoleDefinitionId = 'rd-reader'; RoleTemplateId = '1fe13547-53f6-408d-ac04-7f8eed167b38'; RoleName = 'AI Reader'; IsSensitiveTarget = $true; CanControlServicePrincipals = $false },
-                [PSCustomObject]@{ PrincipalId = 'ga'; PrincipalType = '#microsoft.graph.user'; PrincipalDisplayName = 'GA'; PrincipalUPN = 'ga@contoso.test'; RoleDefinitionId = 'rd-ga'; RoleTemplateId = '62e90394-69f5-4237-9190-012177145e10'; RoleName = 'Global Administrator'; IsSensitiveTarget = $true; CanControlServicePrincipals = $false },
+                [PSCustomObject]@{ PrincipalId = 'reader'; PrincipalType = '#microsoft.graph.user'; PrincipalDisplayName = 'Reader'; PrincipalUPN = 'reader@contoso.test'; RoleDefinitionId = 'rd-reader'; RoleTemplateId = '1fe13547-53f6-408d-ac04-7f8eed167b38'; RoleName = 'AI Reader'; IsSensitiveTarget = $true; CanControlServicePrincipals = $false; DirectoryScopeId = '/'; AppScopeId = $null },
+                [PSCustomObject]@{ PrincipalId = 'ga'; PrincipalType = '#microsoft.graph.user'; PrincipalDisplayName = 'GA'; PrincipalUPN = 'ga@contoso.test'; RoleDefinitionId = 'rd-ga'; RoleTemplateId = '62e90394-69f5-4237-9190-012177145e10'; RoleName = 'Global Administrator'; IsSensitiveTarget = $true; CanControlServicePrincipals = $false; DirectoryScopeId = '/'; AppScopeId = $null },
                 [PSCustomObject]@{ PrincipalId = 'operator'; PrincipalType = '#microsoft.graph.user'; PrincipalDisplayName = 'Operator'; PrincipalUPN = 'operator@contoso.test'; RoleDefinitionId = 'rd-control'; RoleName = 'Custom SP Operator'; IsSensitiveTarget = $false; CanControlApplications = $false; CanControlServicePrincipals = $true; DirectoryScopeId = '/'; AppScopeId = $null },
-                [PSCustomObject]@{ PrincipalId = 'app-operator'; PrincipalType = '#microsoft.graph.user'; PrincipalDisplayName = 'App Operator'; PrincipalUPN = 'appoperator@contoso.test'; RoleDefinitionId = 'rd-app-control'; RoleName = 'Custom Application Credential Operator'; IsSensitiveTarget = $false; CanControlApplications = $true; CanControlServicePrincipals = $false; DirectoryScopeId = '/'; AppScopeId = $null },
-                [PSCustomObject]@{ PrincipalId = 'target-sp'; PrincipalType = '#microsoft.graph.servicePrincipal'; PrincipalDisplayName = 'Privileged Third Party SP'; PrincipalAppId = $null; RoleDefinitionId = 'rd-target'; RoleTemplateId = 'e8611ab8-c189-46e8-94e1-60213ab1f814'; RoleName = 'Privileged Role Administrator'; RoleTier = 'Critical'; IsSensitiveTarget = $true },
-                [PSCustomObject]@{ PrincipalId = 'home-target-sp'; PrincipalType = '#microsoft.graph.servicePrincipal'; PrincipalDisplayName = 'Privileged Home SP'; PrincipalAppId = 'home-target-app'; RoleDefinitionId = 'rd-target'; RoleTemplateId = 'e8611ab8-c189-46e8-94e1-60213ab1f814'; RoleName = 'Privileged Role Administrator'; RoleTier = 'Critical'; IsSensitiveTarget = $true }
+                [PSCustomObject]@{ PrincipalId = 'app-operator'; PrincipalType = '#microsoft.graph.user'; PrincipalDisplayName = 'App Operator'; PrincipalUPN = 'appoperator@contoso.test'; RoleDefinitionId = 'rd-app-control'; RoleName = 'Custom Application Credential Operator'; IsSensitiveTarget = $false; CanControlApplications = $true; CanControlServicePrincipals = $false; AllowedResourceActions = @('microsoft.directory/applications/credentials/update'); DirectoryScopeId = '/'; AppScopeId = $null },
+                [PSCustomObject]@{ PrincipalId = 'target-sp'; PrincipalType = '#microsoft.graph.servicePrincipal'; PrincipalDisplayName = 'Privileged Third Party SP'; PrincipalAppId = $null; RoleDefinitionId = 'rd-target'; RoleTemplateId = 'e8611ab8-c189-46e8-94e1-60213ab1f814'; RoleName = 'Privileged Role Administrator'; RoleTier = 'Critical'; IsSensitiveTarget = $true; DirectoryScopeId = '/'; AppScopeId = $null },
+                [PSCustomObject]@{ PrincipalId = 'home-target-sp'; PrincipalType = '#microsoft.graph.servicePrincipal'; PrincipalDisplayName = 'Privileged Home SP'; PrincipalAppId = 'home-target-app'; RoleDefinitionId = 'rd-target'; RoleTemplateId = 'e8611ab8-c189-46e8-94e1-60213ab1f814'; RoleName = 'Privileged Role Administrator'; RoleTier = 'Critical'; IsSensitiveTarget = $true; DirectoryScopeId = '/'; AppScopeId = $null }
             )
         }
         Mock Get-ApplicationOwners {
-            return @{ 'danger-app' = [PSCustomObject]@{ Status = 'Complete'; Owners = @(
+            return @{ 'danger-app' = [PSCustomObject]@{ Status = 'Complete'; AppObjectId = 'danger-registration'; Owners = @(
                 [PSCustomObject]@{ id = 'reader'; displayName = 'Reader'; userPrincipalName = 'reader@contoso.test' },
                 [PSCustomObject]@{ id = 'ga'; displayName = 'GA'; userPrincipalName = 'ga@contoso.test' }
             ) } }
@@ -331,14 +396,15 @@ Describe 'Attack-path regression fixture' {
         Mock Get-SPDirectCredentials { return @{} }
         Mock Get-AppInstanceLockStatus {
             return @{
-                'danger-app' = [PSCustomObject]@{ State = 'NotConfigured'; IsCredentialLocked = $false }
+                'danger-app' = [PSCustomObject]@{ State = 'NotConfigured'; IsCredentialLocked = $false; ApplicationObjectId = 'danger-registration'; SignInAudience = 'AzureADMyOrg'; ApplicationIdentityStatus = 'Complete' }
                 'target-app' = [PSCustomObject]@{ State = 'OAuthCredentialChangesLocked'; IsCredentialLocked = $true }
-                'home-target-app' = [PSCustomObject]@{ State = 'OAuthCredentialChangesLocked'; IsCredentialLocked = $true }
+                'home-target-app' = [PSCustomObject]@{ State = 'OAuthCredentialChangesLocked'; IsCredentialLocked = $true; ApplicationObjectId = 'home-target-registration'; SignInAudience = 'AzureADMyOrg'; ApplicationIdentityStatus = 'Complete' }
             }
         }
         $script:CachedServicePrincipals = @(
-            [PSCustomObject]@{ id = 'target-sp'; appId = 'target-app'; appOwnerOrganizationId = 'tenant-other' },
-            [PSCustomObject]@{ id = 'home-target-sp'; appId = 'home-target-app'; appOwnerOrganizationId = 'tenant-home' }
+            [PSCustomObject]@{ id = 'target-sp'; appId = 'target-app'; appOwnerOrganizationId = 'tenant-other'; accountEnabled = $true },
+            [PSCustomObject]@{ id = 'home-target-sp'; appId = 'home-target-app'; appOwnerOrganizationId = 'tenant-home'; accountEnabled = $true },
+            [PSCustomObject]@{ id = 'danger-sp'; appId = 'danger-app'; appOwnerOrganizationId = 'tenant-home'; accountEnabled = $true }
         )
 
         $result = @(Invoke-AttackPathAnalysis)
@@ -372,13 +438,13 @@ Describe 'Attack-path regression fixture' {
             return @()
         }
         Mock Get-ApplicationOwners {
-            return @{ 'directory-app' = [PSCustomObject]@{ Status = 'Complete'; Owners = @(
+            return @{ 'directory-app' = [PSCustomObject]@{ Status = 'Complete'; AppObjectId = 'directory-registration'; Owners = @(
                 [PSCustomObject]@{ id = 'owner'; displayName = 'Owner'; userPrincipalName = 'owner@contoso.test' }
             ) } }
         }
         Mock Get-SPDirectCredentials { return @{} }
-        Mock Get-AppInstanceLockStatus { return @{ 'directory-app' = [PSCustomObject]@{ State = 'Disabled'; IsCredentialLocked = $false } } }
-        $script:CachedServicePrincipals = @([PSCustomObject]@{ id = 'directory-sp'; appId = 'directory-app'; appOwnerOrganizationId = 'tenant-home' })
+        Mock Get-AppInstanceLockStatus { return @{ 'directory-app' = [PSCustomObject]@{ State = 'Disabled'; IsCredentialLocked = $false; ApplicationObjectId = 'directory-registration'; SignInAudience = 'AzureADMyOrg'; ApplicationIdentityStatus = 'Complete' } } }
+        $script:CachedServicePrincipals = @([PSCustomObject]@{ id = 'directory-sp'; appId = 'directory-app'; appOwnerOrganizationId = 'tenant-home'; accountEnabled = $true })
 
         $result = @(Invoke-AttackPathAnalysis)
         $result.Count | Should -Be 1
@@ -824,5 +890,29 @@ Describe 'Full-mode orchestration' {
         Should -Invoke Invoke-ConsentRiskAssessment -Times 1 -Exactly
         Should -Invoke Invoke-CredentialHygieneAudit -Times 1 -Exactly
         Should -Invoke Write-AuditCoverageSummary -Times 1 -Exactly
+    }
+
+    It 'exports factual sections without an aggregate risk score' {
+        $script:fullSummaryRows = @()
+        Mock Write-Banner {}
+        Mock Write-Host {}
+        Mock Export-AuditCsv {
+            param($Name, $Data)
+            if ($Name -eq 'FullAuditSummary') { $script:fullSummaryRows = @($Data) }
+        }
+        Mock Write-AuditCoverageSummary {}
+        Mock Invoke-PermissionAudit { return @() }
+        Mock Invoke-RoleAudit { return [PSCustomObject]@{ PrivilegedUsers = @{}; NonPrivilegedUsers = @(); SPRoles = @(); CoverageComplete = $true } }
+        Mock Invoke-AttackPathAnalysis { return @() }
+        Mock Invoke-ShadowAdminDetection { return @() }
+        Mock Invoke-StalePrivilegeDetection { $script:StalePrivilegeDataAvailable = $true; return @() }
+        Mock Invoke-ConsentRiskAssessment { return @() }
+        Mock Invoke-CredentialHygieneAudit { return @() }
+
+        Invoke-FullAudit
+
+        $script:fullSummaryRows.Count | Should -BeGreaterThan 0
+        @($script:fullSummaryRows | Where-Object Section -eq 'OverallRisk').Count | Should -Be 0
+        @($script:fullSummaryRows | Where-Object Section -eq 'DataCoverage').Count | Should -Be 1
     }
 }

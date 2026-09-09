@@ -1,7 +1,7 @@
 {
   "$schema": "./schema/dangerous-permissions.schema.json",
   "description": "High-impact application and delegated permissions. Each definition is bound to its grant type and resource API so identical names on unrelated APIs are not matched.",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "lastUpdated": "2026-08-17",
   "permissions": [
     {

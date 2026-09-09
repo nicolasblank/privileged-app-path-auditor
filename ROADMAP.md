@@ -1,105 +1,90 @@
 # Privileged App Path Auditor Roadmap
 
-This roadmap describes the intended direction of Privileged App Path Auditor. It is a statement of priorities, not a commitment to specific delivery dates.
+This project stays deliberately narrow: it determines who can turn control of an Entra application or service principal into **additional privilege**, shows the path, and states whether the collected evidence is sufficient to trust that conclusion.
 
-Feedback, Microsoft Entra platform changes, and real-world findings may change the order of planned work.
+The roadmap is a statement of priorities, not delivery dates. Microsoft Entra changes, real tenant evidence, and user reports can change the order.
 
-## Current release
-
-The current stable release is **v0.5.1**.
-
-It adds service principal credential visibility, role-based service principal control detection, application instance lock reporting, unowned privileged application detection, and safer handling of unavailable service principal sign-in activity.
-
-## Project priorities
+## Product boundaries
 
 The project will remain:
 
-- Read-only by default
-- Focused on Entra application and service principal attack paths
-- Transparent about missing or incomplete evidence
-- Usable without deploying additional infrastructure
-- Evidence-driven rather than dependent on unexplained risk scores
+- Read-only and usable without additional collector, database, or hosted infrastructure
+- Focused on Entra application and service-principal privilege paths
+- Based on privilege delta and explainable evidence rather than generic inventory counts
+- Explicit about incomplete and unavailable evidence
+- Small enough for an engineer to run and understand directly
 
-Getting the existing findings right comes before adding more checks.
+Permission inventory, credential hygiene, consent posture, and stale-application checks remain supporting context. The project will not compete as a broad Microsoft 365 posture suite or general attack-graph platform.
 
-## Next: v0.5.2 — Fixes to Existing Checks
+## Current: v0.6.0 — Correct path analysis
 
-This release will fix incorrect or unclear behavior in the current checks.
+v0.6 changes the finding engine while preserving the familiar command-line workflow.
 
-Planned work includes:
+- Evaluate current built-in and custom Entra roles from their live permitted actions
+- Account for current Microsoft role classification, with a dated fallback when preview evidence is unavailable
+- Calculate whether a reachable permission or role increases the principal's existing privilege
+- Separate application control from service-principal control
+- Separate application permissions from delegated grants and bind grants to their resource API
+- Separate local application registrations from third-party service principals
+- Apply role-assignment scope and app instance lock evidence to the relevant path
+- Classify paths as direct, potential, or mitigated and report complete, partial, or unavailable data coverage
+- Avoid treating failed queries, missing activity, or unresolved local objects as clean evidence
+- Remove the unexplained aggregate risk score while preserving factual counts and remediation actions
+- Maintain regression coverage on Windows, Linux, and macOS
 
-- Account for current Microsoft Entra role definitions and 2026 role changes
-- Distinguish sensitive target roles, application-control roles, and a principal's existing privileges
-- Improve application instance lock interpretation
-- Improve built-in and custom user consent policy interpretation
-- Keep delegated and application permissions separate
-- Bind dangerous permissions to the correct resource API
-- Distinguish third-party service principals from local application registrations
-- Report incomplete or unavailable evidence instead of silently treating it as clean
-- Add regression tests for corrected behavior
-- Add automated testing on Windows, Linux, and macOS
-- Correct or remove configuration options that do not currently affect behavior
+## Next: v0.7.0 — Complete and stabilize the evidence
 
-## Planned: v0.6.0 — Findings and Role Handling
+The next release closes known evidence gaps and makes every finding suitable for repeatable machine use.
 
-This release will make findings more consistent and improve how application control and Entra roles are evaluated.
+- Expand transitive membership of role-assignable groups and retain the membership chain
+- Include active and eligible/PIM assignments where Microsoft Graph evidence permits
+- Preserve assignment and administrative scope in each relevant finding
+- Introduce stable finding identifiers
+- Define and test a versioned JSON evidence contract
+- Record proof, reason, remediation, exploitability, and coverage on each finding
+- Expand fixtures for custom roles, unusual scopes, locks, third-party apps, and incomplete Graph responses
+- Improve retry, throttling, caching, and large-tenant performance without weakening evidence semantics
 
-Planned work includes:
+PIM and group coverage are valuable here because they complete the lightweight audit's evidence, not because they are unique categories of security tooling.
 
-- Stable finding identifiers
-- A versioned JSON finding format
-- Explicit exploitability, confidence, severity, and data coverage fields
-- Capability-based analysis of built-in and custom Entra roles
-- Direct, group-derived, scoped, active, and eligible/PIM role assignments
-- Clear separation of application registrations, service principals, third-party applications, and agent identities
-- Better retry, throttling, caching, and performance behavior
-- A larger fixture-based test corpus
-- Removal or redesign of the overall risk score
+## Then: v0.8.0 — Show what changed
 
-## Planned: v0.7.0 — Baselines and Change Tracking
+After finding identifiers and JSON are stable, make repeat scans operationally useful.
 
-This release will make repeat scans useful by showing what changed since a previous run.
+- Compare an audit with a trusted baseline
+- Report new, changed, unchanged, and resolved findings
+- Add automation-friendly exit codes
+- Support failure policies such as “new direct privilege-increasing paths”
+- Document unattended authentication and scheduled assessment patterns
+- Produce compact machine-readable evidence for CI and operational review
 
-Planned work includes:
+## Validate before adding
 
-- Baseline reports
-- New, existing, resolved, and changed findings
-- Automation-friendly exit codes
-- Failure conditions such as newly detected critical paths
-- Scheduled assessment examples
-- Optional unattended authentication
-- Additional machine-readable reporting formats
+The following will be considered only when a concrete user workflow demonstrates value:
 
-## Later: v0.8.0 — Reports and Integrations
-
-Possible later work includes:
-
-- Portable static HTML evidence reports
-- Application management policy effectiveness
-- Workload identity protection context
+- Agent identity and workload identity paths not already explained by the current model
+- An MCP adapter over the stable, versioned finding contract
+- SIEM, ticketing, or governance integrations
+- Portable HTML evidence reports
 - Remediation ownership and status tracking
-- Integrations requested by users and contributors
 
-These will be considered after the finding format and core checks are stable.
+An integration or presentation layer is not a roadmap goal on its own.
 
-## Not currently planned
-
-The following are deliberately outside the immediate roadmap:
+## Not planned
 
 - Automatic remediation
 - A hosted administration console
 - A large interactive graph interface
-- Broad Microsoft 365 posture assessment unrelated to application paths
+- Broad Microsoft 365 posture assessment
+- Generic permission, secret, or consent inventory as the product's primary purpose
 
-The project intends to remain a focused, read-only application attack path auditor.
+## Proposing roadmap work
 
-## Feedback and contributions
+[Open an issue](https://github.com/nicolasblank/privileged-app-path-auditor/issues/new) with:
 
-Roadmap feedback is welcome. Please [open a GitHub issue](https://github.com/nicolasblank/privileged-app-path-auditor/issues/new) describing:
+- The principal-to-privilege question the change would answer
+- Why the current evidence model cannot answer it
+- A realistic example or Microsoft documentation
+- The expected finding and coverage behavior
 
-- The problem or attack path
-- Why it matters
-- An example or supporting Microsoft documentation
-- The expected auditor behavior
-
-Security-sensitive reports should not include tenant secrets, tokens, credentials, or private organizational data.
+Do not include tenant secrets, tokens, credentials, or private organizational data in public issues.
