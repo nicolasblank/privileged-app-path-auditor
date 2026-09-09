@@ -36,6 +36,8 @@ For each row in `AttackPaths.csv`, establish:
 
 ### Role control of a privileged service principal
 
+Start with the user summary table to prioritize administrators who reach the most targets and to separate direct, potential, and mitigated counts. Then use each compact chain to identify the exact role and target requiring action. The chain section is console-limited; use `AttackPaths.csv` for complete evidence and filtering.
+
 1. Verify the user's role definition and assignment scope against the correct object ID: application registration for app authority, SP for SP authority.
 2. Inspect the role's allowed resource actions; authentication-settings access alone is not application credential authority. Check `signInAudience` for single-tenant-only actions.
 3. Open the target service principal and confirm its directory-role assignment.
@@ -45,6 +47,7 @@ For each row in `AttackPaths.csv`, establish:
 7. Compare existing and reachable role scopes. An AU-scoped assignment does not establish tenant-wide equivalence. Read all `EvidenceDetail` reasons; a proven alternative route and an uncertain alternative have different effects on the conclusion.
 8. Investigate unsupported directory/app-specific control scopes as unknown applicability, not proof that the role cannot reach the target. Known unrelated-object scopes remain excluded.
 9. When `RoleAssignmentSource` includes `RoleAssignedGroupMember`, use `RoleMembershipPath` and `RoleGroupMembers.csv` to verify the assigned group, source role assignment, user, role, and scope. The path shows effective membership, not intermediate nested groups.
+10. For `Multiple credential routes`, inspect `EvidenceDetail`: more than one application/SP route contributed and no single uncertain route fully explains the candidate.
 
 ### Unowned high-impact application
 

@@ -1866,6 +1866,67 @@ function Invoke-RoleAudit {
 
 #region ── Mode: AttackPath ───────────────────────────────────────────────────
 
+function Get-RolePathDisplayOrder {
+    param([object[]]$Paths)
+
+    @($Paths) | Sort-Object `
+        @{ Expression = {
+            if ($_.Exploitability -eq 'Direct') { 0 }
+            elseif ($_.Exploitability -like 'Potential*') { 1 }
+            else { 2 }
+        } },
+        @{ Expression = {
+            $severityOrder = @{ Critical = 0; High = 1; Medium = 2; Low = 3; Info = 4 }
+            $rank = $severityOrder[[string]$_.Severity]
+            if ($null -eq $rank) { 5 } else { $rank }
+        } },
+        @{ Expression = { [string]$_.UserObjectId } },
+        @{ Expression = { [string]$_.UserUPN } },
+        @{ Expression = { [string]$_.TargetObjectId } },
+        @{ Expression = { [string]$_.AppName } },
+        @{ Expression = { [string]$_.Permission } },
+        @{ Expression = { [int]$_.PathNumber } }
+}
+
+function ConvertTo-SingleLineDisplayText {
+    param([object]$Value)
+    return ([string]$Value -replace '[\r\n]+', ' ').Trim()
+}
+
+function Get-RolePathChainLines {
+    param([object]$Path)
+
+    $stateLabel = if ($Path.Exploitability -eq 'Direct') { 'DIRECT' } elseif ($Path.Exploitability -like 'Potential*') { 'POTENTIAL' } else { 'MITIGATED' }
+    $color = if ($stateLabel -eq 'DIRECT') { 'Red' } elseif ($stateLabel -eq 'POTENTIAL') { 'Yellow' } else { 'Green' }
+    $severity = (ConvertTo-SingleLineDisplayText $Path.Severity).ToUpperInvariant()
+    $route = ConvertTo-SingleLineDisplayText $Path.CredentialRoute
+    if (-not $route) { $route = if ([string]$Path.Action -like 'Add an application credential*') { 'Application credential route' } else { 'SP credential route' } }
+    $user = ConvertTo-SingleLineDisplayText $Path.UserUPN
+    if (-not $user) { $user = ConvertTo-SingleLineDisplayText $Path.UserDisplayName }
+    $role = ConvertTo-SingleLineDisplayText $Path.UserRole
+    $app = ConvertTo-SingleLineDisplayText $Path.AppName
+    $permission = ConvertTo-SingleLineDisplayText $Path.Permission
+    $membershipPath = ConvertTo-SingleLineDisplayText $Path.RoleMembershipPath
+    $result = switch ([string]$Path.Exploitability) {
+        'Direct' { 'Exploitable privilege increase' }
+        'PotentialRoleUnknown' { 'Potential — role evidence incomplete' }
+        'PotentialLockUnknown' { 'Potential — lock evidence unavailable' }
+        'PotentialPrerequisiteUnknown' { 'Potential — prerequisite evidence incomplete' }
+        'MitigatedByAppInstanceLock' { 'Blocked on evaluated route by app instance lock' }
+        default { 'Potential — prerequisite evidence incomplete' }
+    }
+
+    @(
+        [PSCustomObject]@{ Text = "  [$stateLabel | $severity] $user"; Color = $color }
+        [PSCustomObject]@{ Text = "    └─[Role: $role]→ $app"; Color = $color }
+        [PSCustomObject]@{ Text = "       └─[$route]→ $permission"; Color = $color }
+        if ($membershipPath) {
+            [PSCustomObject]@{ Text = "       via group: $membershipPath"; Color = 'DarkGray' }
+        }
+        [PSCustomObject]@{ Text = "       Result: $result"; Color = $color }
+    )
+}
+
 function Invoke-AttackPathAnalysis {
     Write-Banner "ATTACK PATH ANALYSIS -- Privilege Escalation via Applications & Service Principals"
 
@@ -1983,6 +2044,9 @@ function Invoke-AttackPathAnalysis {
                     EvidenceDetail  = $assessment.EvidenceDetail
                     RoleAssignmentSource = ''
                     RoleMembershipPath = ''
+                    CredentialRoute = 'Application credential route'
+                    UserObjectId    = $owner.id
+                    TargetObjectId  = $app.SPId
                     Action          = "Add app credential → authenticate as app → $attackAction"
                     Result          = $impactReason
                     SPDirectCreds   = $spCredCount
@@ -2035,6 +2099,17 @@ function Invoke-AttackPathAnalysis {
                 $isMitigated = $assessment.Exploitability -eq 'MitigatedByAppInstanceLock'
                 $selectedRoute = $routes | Sort-Object @{ Expression = { if ($_.State -eq 'Available') { 0 } elseif ($_.State -eq 'Blocked') { 2 } else { 1 } } } | Select-Object -First 1
                 $canUseApplicationObject = $selectedRoute.Kind -eq 'Application'
+                $routeKinds = @($routes | ForEach-Object Kind | Select-Object -Unique)
+                $availableRouteKinds = @($routes | Where-Object State -eq 'Available' | ForEach-Object Kind | Select-Object -Unique)
+                $credentialRoute = if ($availableRouteKinds.Count -eq 1) {
+                    if ($availableRouteKinds[0] -eq 'Application') { 'Application credential route' } else { 'SP credential route' }
+                } elseif ($availableRouteKinds.Count -gt 1 -or ($availableRouteKinds.Count -eq 0 -and $routeKinds.Count -gt 1)) {
+                    'Multiple credential routes'
+                } elseif ($routeKinds[0] -eq 'Application') {
+                    'Application credential route'
+                } else {
+                    'SP credential route'
+                }
 
                 $pathNum++
                 $spCreds = $spDirectCreds[$sp.PrincipalId]
@@ -2057,6 +2132,9 @@ function Invoke-AttackPathAnalysis {
                     EvidenceDetail  = @($assessment.EvidenceDetail, @($controlMembershipPaths | ForEach-Object { "Role membership path: $_" })) | Where-Object { $_ } | Join-String -Separator '; '
                     RoleAssignmentSource = $controlSources -join ', '
                     RoleMembershipPath = $controlMembershipPaths -join '; '
+                    CredentialRoute = $credentialRoute
+                    UserObjectId    = $userId
+                    TargetObjectId  = $sp.PrincipalId
                     UserDisplayName = $applicableControl[0].PrincipalDisplayName
                     UserUPN         = $applicableControl[0].PrincipalUPN
                     UserRole        = $controlRoleLabels -join ', '
@@ -2148,24 +2226,42 @@ function Invoke-AttackPathAnalysis {
             }
         }
 
-        # Display Role-Based SP Control as a summary table (grouped by user)
+        # Display Role-Based SP Control as a compact summary with bounded detail.
         if ($roleBasedPaths.Count -gt 0) {
             Write-Host ""
             Write-SectionDivider "ROLE-BASED SP CONTROL ($($roleBasedPaths.Count) paths)"
             Write-Host "⚠  Users whose current built-in or custom roles can change application or SP credentials may" -ForegroundColor Yellow
-            Write-Host "   control the $(@($roleBasedPaths | ForEach-Object { $_.AppName } | Select-Object -Unique).Count) service principals below that hold sensitive roles." -ForegroundColor Yellow
+            Write-Host "   control the $(@($roleBasedPaths | ForEach-Object { if ($_.TargetObjectId) { $_.TargetObjectId } elseif ($_.AppId) { $_.AppId } else { $_.AppName } } | Select-Object -Unique).Count) service principals below that hold sensitive roles." -ForegroundColor Yellow
             Write-Host ""
 
-            $roleBasedUsers = $roleBasedPaths | Group-Object UserUPN
-            foreach ($userGroup in $roleBasedUsers) {
+            $roleSummary = @($roleBasedPaths | Group-Object { if ($_.UserObjectId) { $_.UserObjectId } elseif ($_.UserUPN) { $_.UserUPN } else { $_.UserDisplayName } } | ForEach-Object {
+                $userGroup = $_
                 $first = $userGroup.Group | Select-Object -First 1
-                Write-Host "  $($first.UserDisplayName) ($($first.UserUPN))" -ForegroundColor White
-                Write-Host "  Role: $($first.UserRole)  →  can control $($userGroup.Count) privileged SP(s):" -ForegroundColor Gray
-                $userGroup.Group | Select-Object @{N='  SP Name';E={$_.AppName}},
-                    @{N='SP Roles';E={$_.Permission}},
-                    @{N='SP Direct Creds';E={$_.SPDirectCreds}},
-                    @{N='Exploitability';E={$_.Exploitability}} |
-                    Format-Table -AutoSize | Out-String | Write-Host
+                [PSCustomObject]@{
+                    User = ConvertTo-SingleLineDisplayText $(if ($first.UserUPN) { $first.UserUPN } else { $first.UserDisplayName })
+                    'Role(s)' = @($userGroup.Group.UserRole | ForEach-Object { ConvertTo-SingleLineDisplayText $_ } | Select-Object -Unique) -join ', '
+                    Targets = @($userGroup.Group | ForEach-Object { if ($_.TargetObjectId) { $_.TargetObjectId } elseif ($_.AppId) { $_.AppId } else { $_.AppName } } | Select-Object -Unique).Count
+                    Direct = @($userGroup.Group | Where-Object Exploitability -eq Direct).Count
+                    Potential = @($userGroup.Group | Where-Object Exploitability -like 'Potential*').Count
+                    Mitigated = @($userGroup.Group | Where-Object Exploitability -eq MitigatedByAppInstanceLock).Count
+                }
+            } | Sort-Object User)
+            $roleSummary | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
+
+            $orderedRolePaths = @(Get-RolePathDisplayOrder -Paths $roleBasedPaths)
+            $truncateAfter = [Math]::Max(1, [int]$script:AuditConfig.output.truncateAfter)
+            $displayedRolePaths = @($orderedRolePaths | Select-Object -First $truncateAfter)
+            Write-Host "PATH CHAINS (showing $($displayedRolePaths.Count) of $($orderedRolePaths.Count))" -ForegroundColor White
+            foreach ($path in $displayedRolePaths) {
+                foreach ($line in @(Get-RolePathChainLines -Path $path)) {
+                    Write-Host $line.Text -ForegroundColor $line.Color
+                }
+                Write-Host ''
+            }
+            if ($orderedRolePaths.Count -gt $displayedRolePaths.Count) {
+                $remaining = $orderedRolePaths.Count - $displayedRolePaths.Count
+                $guidance = if ($script:ExportPath) { "complete evidence exported to $($script:ExportPath)" } else { 'rerun with -ExportPath for complete evidence' }
+                Write-Host "... ($remaining more role-control paths; $guidance)" -ForegroundColor DarkGray
             }
 
             $pathDef = $script:AttackPathDefs | Where-Object { $_.id -eq 'ROLE_BASED_SP_CONTROL' } | Select-Object -First 1

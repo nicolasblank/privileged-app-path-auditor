@@ -8,6 +8,8 @@ v0.6 changes how findings are calculated, not how the auditor is run. Results ca
 
 ### Changed
 
+- Replace the unbounded role-control target table with a one-row-per-user triage summary and prioritized compact path chains. Console detail respects `output.truncateAfter`; returned and exported findings remain complete.
+- Count users and target SPs by stable object identity, add deterministic chain ordering, identify ambiguous candidates as `Multiple credential routes`, and normalize tenant-controlled labels to single-line console text.
 - Read current Entra role definitions at runtime, including Microsoft `isPrivileged` classification and permitted actions for built-in and custom roles.
 - Resolve legacy role definitions individually when the collection endpoint omits them.
 - Add a dated fallback for relevant 2026 role additions and classification changes when preview classification is unavailable.
@@ -55,6 +57,7 @@ v0.6 changes how findings are calculated, not how the auditor is run. Results ca
 
 ### Testing
 
+- Add rendering regressions for state/severity ordering, stable identity counts, multiple-route presentation, group provenance, console-only truncation, single-line safety, and unchanged returned/exported path counts.
 - Add test-first role-group expansion fixtures for empty, nested, paginated, failed, malformed, duplicate, direct-plus-group, permission-equivalence, role-control, RoleAudit, coverage, and mixed-CSV behavior.
 - Add standalone grant-type/coverage regressions and sentinel configuration-contract tests, including owner severity fallback, target-role severity precedence, unowned console-only recommendations, descriptive-only IDs, and the checked-in description wording.
 - Add test-first P2 suites for resource/cache/export boundaries, consent, credential dates/counts, Full summaries, missing responses, and mode isolation. Use synthetic Graph responses, TestDrive-only caches/exports, and injected clocks; no tenant access is required.

@@ -41,13 +41,16 @@ Important `AttackPaths.csv` columns include:
 | `PathType` | Human-readable path category. |
 | `Severity` | Impact of the reachable permission or directory role, not a probability score. |
 | `UserDisplayName`, `UserUPN` | Principal that holds the observed control relationship. |
+| `UserObjectId` | Stable object ID used for actor grouping and deterministic display ordering. |
 | `UserRole` | Existing role evidence used for the privilege-delta decision. |
 | `AppName`, `AppId` | Target application identity. |
+| `TargetObjectId` | Target service-principal object ID used for unique target counts and deterministic ordering. |
 | `Permission`, `PermissionType` | Reachable permission or directory role and its category. |
 | `Exploitability` | `Direct`, a `Potential*` state, or `MitigatedByAppInstanceLock`. |
 | `EvidenceDetail` | Additive explanation of missing prerequisite, role, scope, and alternative-route evidence; present on both path types. |
 | `RoleAssignmentSource` | `Direct`, `RoleAssignedGroupMember`, or both for a role-control actor; blank for owner paths. |
 | `RoleMembershipPath` | Semicolon-separated `assigned-group ID -> effective-user ID` provenance for group-derived role control; blank when not applicable. |
+| `CredentialRoute` | `Application credential route`, `SP credential route`, or `Multiple credential routes` for the evaluated role-control candidate. |
 | `Action` | The evaluated control-to-privilege chain. |
 | `Result` | The specific impact supported by the target privilege. |
 | `SPDirectCreds` | Count of observed SP credentials whose complete start/end interval includes the audit time. |
@@ -75,6 +78,15 @@ Potential and mitigated rows are retained because they identify an evidence gap 
 Role uncertainty takes precedence over unmet prerequisites; both take precedence over mitigation. Only then can all evaluated routes being blocked establish mitigation. Remaining unknown lock evidence takes precedence over `Direct`. Unsupported control-scope syntax is uncertainty, not exclusion. A proven alternative route can remove route-specific uncertainty, but not missing role or account evidence. Consult `EvidenceDetail` for all reasons; the state is not a list of every gap.
 
 A potential row can therefore retain `AppInstanceLock = OAuthCredentialChangesLocked` and a blocked-route explanation without being classified as mitigated. It keeps the target-impact severity rather than `INFO`. The P1 follow-up changes these classifications, not column names or exploitability-state names.
+
+## Console role-path view
+
+The role-control section is intentionally split:
+
+1. **User summary table** — one row per stable user object, listing applicable role labels, unique target object count, and direct/potential/mitigated totals.
+2. **Compact path chains** — prioritized detail showing actor → role → target SP → credential route → reachable role.
+
+Chains are deterministically ordered: direct first, potential second, mitigated last; then severity, identity, target, and reachable role. Console chains are capped by `output.truncateAfter`. The grouped summary always covers all role-control paths, and `AttackPaths.csv` always retains every row. When multiple unresolved application/SP routes contribute, console output uses `Multiple credential routes`; use `EvidenceDetail` in CSV for the individual uncertainty reasons.
 
 ## Credential count contract
 

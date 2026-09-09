@@ -74,6 +74,8 @@ The `Exploitability` field describes what the collected evidence supports:
 
 `EvidenceDetail` explains missing prerequisites and scope evidence on attack-path rows. A proven application route can bypass a locked SP route. A blocked observed route does not establish full mitigation when role evidence could conceal another route. Unsupported control scopes remain uncertain, not silently excluded. The auditor does not assume it can re-enable a disabled target.
 
+Role-control console output has two levels: a one-row-per-user summary for triage, followed by prioritized compact chains for remediation. Chains are ordered direct, potential, then mitigated; only console detail is truncated. CSV retains every path.
+
 Credential hygiene reports `CredentialEvidence` per application. `Unknown` is not zero: numeric counts with incomplete evidence are observed lower bounds. A failed query or an unobservable publisher registration is not a credential-free application.
 
 `FullAuditSummary.csv` qualifies each mode with `CoverageState` and `CoverageDetail`; unrelated failures do not taint a mode's own evidence, while run-wide coverage retains every failure. Credential validity uses both start and end timestamps, and stale summary counts are distinct applications rather than permission rows.
