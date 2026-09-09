@@ -24,6 +24,9 @@ v0.6 changes how findings are calculated, not how the auditor is run. Results ca
 
 ### Fixed
 
+- Expand active role-assigned groups to effective transitive user assignments with inherited role/scope evidence and source-group provenance. Retain raw group assignments, successful groups, and users observed before later-page failures; keep incomplete groups partial.
+- Prevent false negative role classification when expanded assignment principal metadata is missing or unsupported. Preserve distinct source role-assignment IDs while suppressing repeated copies of the same assignment record.
+- Keep role-group provenance columns stable in mixed `AttackPaths.csv` exports.
 - P2 review follow-up: share conditional permission-coverage requirements across standalone PermissionAudit, standalone CredentialHygiene, and Full. Application-only and intentionally empty configurations no longer report missing delegated coverage; genuine required-source failures still warn.
 - Clarify the attack-path catalogue's existing runtime limits: three IDs provide specific overrides, and unused metadata does not configure detectors, output labels, or references. No new catalogue functionality is enabled.
 - Correct checked-in audit descriptions to distinguish currently valid direct-SP credentials from inactive inventory, and single-user consent beneficiaries from approval actors.
@@ -52,6 +55,7 @@ v0.6 changes how findings are calculated, not how the auditor is run. Results ca
 
 ### Testing
 
+- Add test-first role-group expansion fixtures for empty, nested, paginated, failed, malformed, duplicate, direct-plus-group, permission-equivalence, role-control, RoleAudit, coverage, and mixed-CSV behavior.
 - Add standalone grant-type/coverage regressions and sentinel configuration-contract tests, including owner severity fallback, target-role severity precedence, unowned console-only recommendations, descriptive-only IDs, and the checked-in description wording.
 - Add test-first P2 suites for resource/cache/export boundaries, consent, credential dates/counts, Full summaries, missing responses, and mode isolation. Use synthetic Graph responses, TestDrive-only caches/exports, and injected clocks; no tenant access is required.
 - Replace the regression that incorrectly expected full mitigation with incomplete role evidence. Add `P1FollowUp.Tests.ps1` with end-to-end Graph-collector fixtures for the three independent-review findings, including partial role pages, role groups, unsupported scopes, retained lock evidence, and resource-specific equivalence boundaries.
@@ -67,9 +71,10 @@ v0.6 changes how findings are calculated, not how the auditor is run. Results ca
 - `PermissionAudit.csv`: consistently include `ConsentPrincipalId`, empty for application grants.
 - `UserConsentGrants.csv`: change from per-client aggregates to per-grant rows (`GrantId`, `ClientSPId`, `ResourceSPId`, `ConsentPrincipalId`, `ConsentType`, `ConsentedScopes`, `AppName`). Replace plural `ResourceSPIds`; remove misleading `ConsentingUsers`.
 - `FullAuditSummary.csv`: add `CoverageState` and `CoverageDetail`; `Count` remains observed counts, and stale counts are distinct app IDs. Action-row coverage fields are blank.
+- `RoleAssignedGroups.csv`: retain raw group assignments with scope and role-assignment ID. Add `RoleGroupMembers.csv` for effective transitive users and source-group provenance. Add `RoleAssignmentSource` and `RoleMembershipPath` to role-control attack paths, with blank columns retained on owner paths for a stable CSV schema.
 - Active SP counters and `StalePrivilege.ValidCredCount` now require a current complete interval; hygiene total inventory still includes future/expired records. Stale expiry dates are formatted in UTC.
 - Retain existing modes, parameters, filenames, path IDs, configuration keys, and version `0.6.0` while this release is unreleased. Existing CSV consumers must handle the new state/column and nonnumeric unknown hygiene counts.
-- These accuracy passes do not resolve live lock-enforcement questions, PIM/group expansion, re-enablement paths, arbitrary custom-resource/custom-role equivalence, sign-in `Never` semantics, or SAML credential purpose. No JSON contract or roadmap features were added.
+- These accuracy passes do not resolve live lock-enforcement questions, PIM-eligible assignments, hidden-membership access, intermediate nested-group reconstruction, re-enablement paths, arbitrary custom-resource/custom-role equivalence, sign-in `Never` semantics, or SAML credential purpose. No JSON contract was added.
 
 ## [0.5.1] - 2026-07-19
 

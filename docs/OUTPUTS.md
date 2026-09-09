@@ -16,7 +16,8 @@ Treat the export directory as confidential tenant security evidence.
 | `UnknownOwnerApps.csv` | Modes that collect service principals | Service principals without a resolved owner organization and a direct Entra link for investigation. |
 | `PermissionAudit.csv` | `PermissionAudit`, `Full` | Configured high-impact application and delegated grants, their resource API, effect, and exploitability context. |
 | `RoleAudit.csv` | `RoleAudit`, `Full` | Users observed with sensitive-role assignments and users confirmed without them when role evidence is complete. |
-| `RoleAssignedGroups.csv` | `RoleAudit`, `Full` | Active assignments to groups. v0.6 does not expand transitive members, so coverage is partial when these exist. |
+| `RoleAssignedGroups.csv` | `RoleAudit`, `Full` | Raw active assignments to groups, including role, scope, and role-assignment ID. |
+| `RoleGroupMembers.csv` | `RoleAudit`, `Full` | Effective transitive user role evidence derived from assigned groups, including source group, role, scope, source assignment ID, and membership provenance. |
 | `AttackPaths.csv` | `AttackPath`, `Full` | Privilege-increasing owner and role-control paths, potential paths, and lock-mitigated routes. |
 | `UnownedPrivilegedApps.csv` | `AttackPath`, `Full` | Confirmed local applications with configured high-impact application permissions and no owners. |
 | `ShadowAdmins.csv` | `ShadowAdmins`, `Full` | Owners of service principals with sensitive directory roles, including direct SP credential counts. |
@@ -45,6 +46,8 @@ Important `AttackPaths.csv` columns include:
 | `Permission`, `PermissionType` | Reachable permission or directory role and its category. |
 | `Exploitability` | `Direct`, a `Potential*` state, or `MitigatedByAppInstanceLock`. |
 | `EvidenceDetail` | Additive explanation of missing prerequisite, role, scope, and alternative-route evidence; present on both path types. |
+| `RoleAssignmentSource` | `Direct`, `RoleAssignedGroupMember`, or both for a role-control actor; blank for owner paths. |
+| `RoleMembershipPath` | Semicolon-separated `assigned-group ID -> effective-user ID` provenance for group-derived role control; blank when not applicable. |
 | `Action` | The evaluated control-to-privilege chain. |
 | `Result` | The specific impact supported by the target privilege. |
 | `SPDirectCreds` | Count of observed SP credentials whose complete start/end interval includes the audit time. |
@@ -66,6 +69,8 @@ Column availability can vary by path type. Stable cross-version finding IDs and 
 | `MitigatedByAppInstanceLock` | Role and prerequisite evidence is complete and the observed lock blocks all evaluated OAuth credential routes. |
 
 Potential and mitigated rows are retained because they identify an evidence gap or an important control. They should not be counted as confirmed direct paths.
+
+`RoleMembershipPath` records effective assignment provenance, not every nested group hop. `RoleGroupMembers.csv` is the evidence table for group-derived roles. Distinct source role-assignment IDs remain distinct rows; identical repeated records are suppressed. If any relevant group expansion is partial, role-dependent path conclusions remain potential even when some memberships were observed.
 
 Role uncertainty takes precedence over unmet prerequisites; both take precedence over mitigation. Only then can all evaluated routes being blocked establish mitigation. Remaining unknown lock evidence takes precedence over `Direct`. Unsupported control-scope syntax is uncertainty, not exclusion. A proven alternative route can remove route-specific uncertainty, but not missing role or account evidence. Consult `EvidenceDetail` for all reasons; the state is not a list of every gap.
 

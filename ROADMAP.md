@@ -36,7 +36,7 @@ v0.6 changes the finding engine while preserving the familiar command-line workf
 
 The next release closes known evidence gaps and makes every finding suitable for repeatable machine use.
 
-- Expand transitive membership of role-assignable groups and retain the membership chain
+- Expand active role-assigned groups to effective transitive user members and retain assigned-group provenance (completed in v0.6); consider intermediate nesting evidence only if Graph evidence permits it
 - Include active and eligible/PIM assignments where Microsoft Graph evidence permits
 - Preserve assignment and administrative scope in each relevant finding
 - Introduce stable finding identifiers

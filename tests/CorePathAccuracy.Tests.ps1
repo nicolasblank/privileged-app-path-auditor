@@ -403,12 +403,16 @@ Describe 'Core path accuracy through real collectors' {
         $paths.Count | Should -Be 2
         foreach ($path in $paths) {
             $path.PSObject.Properties.Name | Should -Contain EvidenceDetail
+            $path.PSObject.Properties.Name | Should -Contain RoleAssignmentSource
+            $path.PSObject.Properties.Name | Should -Contain RoleMembershipPath
             $path.EvidenceDetail | Should -Match 'role'
         }
         $csv = @($paths | ConvertTo-Csv | ConvertFrom-Csv)
         ($csv | Where-Object PathId -eq ROLE_BASED_SP_CONTROL).EvidenceDetail | Should -Match 'lock'
         $reverseCsv = @($paths[1], $paths[0]) | ConvertTo-Csv | ConvertFrom-Csv
         ($reverseCsv | Where-Object PathId -eq APP_OWNER_ESCALATION).EvidenceDetail | Should -Match 'role'
+        ($csv | Where-Object PathId -eq ROLE_BASED_SP_CONTROL).RoleAssignmentSource | Should -Not -BeNullOrEmpty
+        ($reverseCsv | Where-Object PathId -eq APP_OWNER_ESCALATION).RoleAssignmentSource | Should -BeNullOrEmpty
     }
 
     It 'does not infer full mitigation from blocked observed routes when role evidence is incomplete' {

@@ -85,6 +85,12 @@ The tool reads role definitions at runtime:
 - The assignment's `directoryScopeId` is applied to the target.
 - The configured built-in template IDs provide an explicit fallback when preview classification is unavailable.
 
+Active role assignments to groups are expanded with the read-only Microsoft Graph transitive-user endpoint. The original group assignment remains evidence, and each effective user receives a derived assignment with the same role definition, assignment scope, and source assignment ID. This lets privilege-delta checks account for a user's current group-derived authority and lets group-derived credential-control roles create path candidates.
+
+The provenance is deliberately limited to `assigned group ID -> effective user ID`. The endpoint returns transitive user leaves but not each intermediate nested group, so `MembershipPath` is not a reconstructed nesting chain. Each distinct Graph role-assignment ID is retained. Duplicate copies of the same assignment ID are suppressed, while the same user reached through different groups, roles, or scopes remains separate evidence.
+
+Group expansion is complete only when every relevant assigned group returns usable user identities across all pages. A failed or malformed group response makes `RoleGroupMemberships` partial while retaining other groups and users observed before a later-page failure. Missing or unsupported principal type on an active role assignment also prevents negative role classification. Empty successful groups remain complete. Groups with hidden membership can require `Member.Read.Hidden`; that permission is not requested by v0.6, so a Graph denial remains explicit partial coverage.
+
 The v0.6 fallback includes relevant role additions and classification changes known in 2026, but live definitions remain authoritative. When the live classification cannot be collected, `RoleDefinitions` coverage is partial.
 
 ## Object and permission boundaries
@@ -97,7 +103,7 @@ The auditor keeps these concepts separate:
 | Home-tenant vs third-party service principal | A tenant can govern consent to a third-party application but cannot inspect or manage its external application registration. |
 | Application vs delegated grant | Application permissions work as the workload; delegated permissions require a signed-in user. |
 | Permission name vs resource API | Identical permission names on different APIs do not necessarily represent the same capability. |
-| Active assignment vs group/PIM evidence | v0.6 observes active assignments but does not yet expand transitive role-group membership or eligible assignments. |
+| Active assignment vs group/PIM evidence | v0.6 expands active role-assigned groups to transitive user leaves, but does not include eligible/PIM assignments or reconstruct intermediate nested groups. |
 
 ## Coverage model
 
@@ -116,7 +122,7 @@ Examples:
 - Failure of the top-level service-principal query makes `ServicePrincipals` unavailable.
 - A failed grant query for one client makes application-permission coverage partial while retaining other collected findings.
 - Failure to retrieve sign-in activity makes stale detection unavailable and stops credential lookup for that mode.
-- A detected role-assigned group makes role-group membership coverage partial because v0.6 does not expand its transitive users.
+- A failed, partial, malformed, or access-limited role-group expansion makes role-group membership coverage partial while retaining observed users and raw group assignments.
 
 Inventory, application/delegated grants, user-consent grants, role definitions/assignments, and federated credentials retain successfully collected pages if a later page fails. Their source becomes `Partial`, and later successes cannot restore aggregate completeness. A failed first page, or failure before any items were observed, still uses the collector's failure state. Role and permission findings observed before a failure remain usable evidence, not proof of a complete scan.
 

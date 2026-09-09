@@ -684,17 +684,21 @@ Describe 'Role fallback and evidence safety' {
         Should -Invoke Invoke-MgGraphRequest -Times 1 -Exactly
     }
 
-    It 'marks role-assigned group expansion as partial' {
+    It 'marks a failed role-assigned group expansion as partial' {
         Mock Write-Host {}
         Mock Get-AllGraphPages {
             param($Uri)
             if ($Uri -match 'roleDefinitions') {
                 return @([PSCustomObject]@{ id = 'rd-ga'; templateId = '62e90394-69f5-4237-9190-012177145e10'; displayName = 'Global Administrator'; isBuiltIn = $true; isEnabled = $true; isPrivileged = $true; rolePermissions = @() })
             }
-            return @([PSCustomObject]@{
-                roleDefinitionId = 'rd-ga'; principalId = 'group-1'; directoryScopeId = '/'; appScopeId = $null
-                principal = [PSCustomObject]@{ '@odata.type' = '#microsoft.graph.group'; displayName = 'Tier Zero Group' }
-            })
+            if ($Uri -match 'roleAssignments') {
+                return @([PSCustomObject]@{
+                    roleDefinitionId = 'rd-ga'; principalId = 'group-1'; directoryScopeId = '/'; appScopeId = $null
+                    principal = [PSCustomObject]@{ '@odata.type' = '#microsoft.graph.group'; displayName = 'Tier Zero Group' }
+                })
+            }
+            if ($Uri -match '/groups/group-1/transitiveMembers/') { throw 'synthetic denied group expansion' }
+            throw "Unexpected URI: $Uri"
         }
 
         @(Get-PrivilegedRoleAssignments).Count | Should -Be 1

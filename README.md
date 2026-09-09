@@ -86,7 +86,7 @@ See [Investigating findings](docs/INVESTIGATING-FINDINGS.md) for a practical tri
 |---|---|
 | `AttackPath` | Maps privilege-increasing application-owner and role-control paths. This is the primary mode. |
 | `PermissionAudit` | Reports configured high-impact application and delegated grants, kept separate. |
-| `RoleAudit` | Reports active sensitive-role assignments and role-assigned groups. |
+| `RoleAudit` | Reports direct and group-derived active sensitive-role assignments, assigned groups, and effective transitive user members. |
 | `ShadowAdmins` | Finds owners of service principals that hold sensitive directory roles. |
 | `StalePrivilege` | Finds high-impact applications with valid credentials and no recent sign-in evidence. |
 | `ConsentRisk` | Reviews tenant consent policy and single-user delegated grants without inferring who approved consent. |
@@ -158,7 +158,7 @@ Exports are opt-in and use one CSV per relevant mode. Important files include:
 
 - `AttackPaths.csv` — the principal, controlled object, target permission or role, exploitability, result, remediation, and Entra links
 - `PermissionAudit.csv` — high-impact application and delegated grants
-- `RoleAudit.csv` and `RoleAssignedGroups.csv` — observed active role evidence
+- `RoleAudit.csv`, `RoleAssignedGroups.csv`, and `RoleGroupMembers.csv` — observed direct, assigned-group, and effective transitive-user role evidence
 - `DataCoverage.csv` — completeness and failure detail for every queried evidence source
 - `FullAuditSummary.csv` — factual mode counts, coverage, and top actions; no aggregate risk score
 
@@ -169,7 +169,8 @@ See [Output reference](docs/OUTPUTS.md) for the complete file list and interpret
 - Authentication is interactive delegated authentication; unattended application authentication is not implemented.
 - `StalePrivilege` uses the beta `servicePrincipalSignInActivities` endpoint. If it is unavailable, stale detection is skipped rather than inferred from missing data.
 - Microsoft's role `isPrivileged` classification is obtained from Graph beta when available. Fallback configuration is used with partial coverage when it is not.
-- v0.6 reports active role assignments. PIM-eligible assignments and transitive members of role-assigned groups are not expanded.
+- v0.6 reports active direct assignments and expands role-assigned groups to effective transitive user members. PIM-eligible assignments are not included.
+- Group provenance records the assigned group and effective user (`group ID -> user ID`). Microsoft Graph does not return the intermediate nested-group chain from this endpoint. Hidden memberships can require additional Graph permission; failures remain partial rather than inferred complete.
 - Tenant-wide and object-specific scopes are evaluated separately for application and SP credential routes. Role equivalence recognizes supported same-scope and tenant-wide coverage, not arbitrary administrative-scope containment.
 - A mitigated result applies to the specific credential route evaluated; it is not a general statement that the application is safe.
 - Lock enforcement across home and consumer tenants remains a service-validation question; these fixes do not change that assumption or perform live exploitation tests.

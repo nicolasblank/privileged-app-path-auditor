@@ -62,11 +62,13 @@ The auditor attempts to read Microsoft `isPrivileged` classification from Graph 
 
 Do not remove that warning merely because the fallback produced familiar role names.
 
-## Role-assigned groups make coverage partial
+## Role-assigned group expansion is partial
 
-v0.6 lists active role assignments to groups but does not expand their transitive user membership. Review `RoleAssignedGroups.csv` and resolve nested membership separately before asserting that every user path has been enumerated.
+v0.6 expands role-assigned groups to effective transitive user members using `GET /groups/{id}/transitiveMembers/microsoft.graph.user`. `Directory.Read.All`, already requested by the auditor, is sufficient for ordinary group membership reads.
 
-Transitive expansion is planned for v0.7.
+Review `DataCoverage.csv` for the affected group ID and Graph error. Earlier pages and other successful groups are retained, but absent users cannot be treated as confirmed non-members while coverage is partial. Hidden-membership groups can require `Member.Read.Hidden`, which v0.6 does not request. Do not add broader permission merely to produce a clean report without first confirming that hidden membership is the actual requirement.
+
+`RoleGroupMembers.csv` records the assigned group, effective user, role, scope, source assignment ID, and `group -> user` provenance. It does not reconstruct intermediate nested groups.
 
 ## App instance lock is unavailable or not applicable
 

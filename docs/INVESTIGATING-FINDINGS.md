@@ -44,6 +44,7 @@ For each row in `AttackPaths.csv`, establish:
 6. Reduce or scope the application-control role, remove unnecessary target privilege, and use eligible assignment with appropriate approval where possible.
 7. Compare existing and reachable role scopes. An AU-scoped assignment does not establish tenant-wide equivalence. Read all `EvidenceDetail` reasons; a proven alternative route and an uncertain alternative have different effects on the conclusion.
 8. Investigate unsupported directory/app-specific control scopes as unknown applicability, not proof that the role cannot reach the target. Known unrelated-object scopes remain excluded.
+9. When `RoleAssignmentSource` includes `RoleAssignedGroupMember`, use `RoleMembershipPath` and `RoleGroupMembers.csv` to verify the assigned group, source role assignment, user, role, and scope. The path shows effective membership, not intermediate nested groups.
 
 ### Unowned high-impact application
 
@@ -63,6 +64,16 @@ An unowned application is an accountability and lifecycle finding, not automatic
 3. Review SP-level credentials and their complete validity intervals; active counts exclude future or unknown intervals. Credential purpose still needs investigation, not an assumption that every SP certificate is an injected client credential.
 4. Review role assignment, owner, and credential-change audit events.
 5. Remove unnecessary ownership or role assignment rather than relying only on credential rotation.
+
+## Role-assigned groups
+
+`RoleAssignedGroups.csv` is the raw assignment evidence. `RoleGroupMembers.csv` lists effective user members returned by the transitive-members endpoint.
+
+1. Verify the source group remains intentionally role-assignable and the role assignment's scope is correct.
+2. Confirm the effective user is still a transitive member. The recorded path is `assigned group -> user`; investigate intermediate groups separately if needed.
+3. Treat duplicate source assignment IDs, unexpected multiple groups, and tenant-wide group-derived administration as high-value review points.
+4. If `RoleGroupMemberships` is partial, do not classify absent users as non-privileged. Check access to hidden membership and any failed group IDs in `DataCoverage.csv`.
+5. Prefer reducing group membership or assignment scope through normal change control; this auditor does not remediate.
 
 ## Permission findings
 

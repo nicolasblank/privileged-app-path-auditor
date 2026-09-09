@@ -1209,6 +1209,9 @@ function Get-PrivilegedRoleAssignments {
 
     $results = @()
     $failedDefinitionIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $groupExpansionCache = @{}
+    $rawAssignmentKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $effectiveAssignmentKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     Set-CoverageState -Source 'RoleGroupMemberships' -State Complete
     foreach ($assignment in $allAssignments) {
         $definition = $definitionEvidence[$assignment.roleDefinitionId]
@@ -1227,13 +1230,30 @@ function Get-PrivilegedRoleAssignments {
         }
         if (-not ($definition.IsSensitiveTarget -or $definition.CanControlApplications -or $definition.CanControlServicePrincipals)) { continue }
 
-        if ($assignment.principal.'@odata.type' -eq '#microsoft.graph.group') {
-            Set-CoverageState -Source 'RoleGroupMemberships' -State Partial -Detail 'Role-assigned groups are listed, but their transitive user membership is not expanded in v0.6.0.'
+        $principalType = [string]$assignment.principal.'@odata.type'
+        $isGroupAssignment = $principalType -eq '#microsoft.graph.group'
+        if ($principalType -notin @('#microsoft.graph.user', '#microsoft.graph.servicePrincipal', '#microsoft.graph.group')) {
+            Set-CoverageState -Source 'RoleGroupMemberships' -State Partial -Detail "Role assignment $($assignment.id) for principal $($assignment.principalId) has missing or unsupported principal type."
         }
-        $results += [PSCustomObject]@{
+        $assignmentSource = if ($isGroupAssignment) { 'RoleAssignedGroup' } else { 'Direct' }
+        $sourceGroupId = if ($isGroupAssignment) { $assignment.principalId } else { $null }
+        $sourceGroupName = if ($isGroupAssignment) { $assignment.principal.displayName } else { $null }
+        $rawAssignmentKey = if ($assignment.id) {
+            "id:$($assignment.id)"
+        } else {
+            "shape:$($assignment.principalId)`u{1f}$($assignment.roleDefinitionId)`u{1f}$($assignment.directoryScopeId)`u{1f}$($assignment.appScopeId)"
+        }
+        if ($rawAssignmentKeys.Add($rawAssignmentKey)) {
+            $results += [PSCustomObject]@{
+            RoleAssignmentId      = $assignment.id
+            SourceAssignmentId    = $null
+            AssignmentSource      = $assignmentSource
+            SourceGroupId         = $sourceGroupId
+            SourceGroupName       = $sourceGroupName
+            MembershipPath        = $sourceGroupId
             PrincipalId          = $assignment.principalId
             PrincipalDisplayName = $assignment.principal.displayName
-            PrincipalType        = $assignment.principal.'@odata.type'
+            PrincipalType        = $principalType
             PrincipalUPN         = $assignment.principal.userPrincipalName
             PrincipalAppId       = $assignment.principal.appId
             RoleDefinitionId     = $assignment.roleDefinitionId
@@ -1248,6 +1268,59 @@ function Get-PrivilegedRoleAssignments {
             DefinitionSource     = $definition.DefinitionSource
             DirectoryScopeId     = $assignment.directoryScopeId
             AppScopeId           = $assignment.appScopeId
+            }
+        }
+
+        if (-not $isGroupAssignment) { continue }
+        $groupId = [string]$assignment.principalId
+        if ([string]::IsNullOrWhiteSpace($groupId)) {
+            Set-CoverageState -Source 'RoleGroupMemberships' -State Partial -Detail 'A role-assigned group is missing its principal ID.'
+            continue
+        }
+        if (-not $groupExpansionCache.ContainsKey($groupId)) {
+            $members = @()
+            $expansionComplete = $false
+            try {
+                $members = @(Get-AllGraphPages -Uri "https://graph.microsoft.com/v1.0/groups/$groupId/transitiveMembers/microsoft.graph.user?`$select=id,displayName,userPrincipalName&`$top=999" -CoverageSource 'RoleGroupMemberships' -CollectionComplete ([ref]$expansionComplete))
+            } catch {
+                Set-CoverageState -Source 'RoleGroupMemberships' -State Partial -Detail "Failed to expand role-assigned group ${groupId}: $($_.Exception.Message)"
+            }
+            $groupExpansionCache[$groupId] = [PSCustomObject]@{ Members = $members; Complete = $expansionComplete }
+        }
+
+        foreach ($member in @($groupExpansionCache[$groupId].Members)) {
+            $memberId = [string]$member.id
+            if ([string]::IsNullOrWhiteSpace($memberId)) {
+                Set-CoverageState -Source 'RoleGroupMemberships' -State Partial -Detail "Role-assigned group ${groupId} returned a user without a usable ID."
+                continue
+            }
+            $effectiveKey = @($memberId, $assignment.roleDefinitionId, $assignment.directoryScopeId, $assignment.appScopeId, $groupId, $assignment.id) -join "`u{1f}"
+            if (-not $effectiveAssignmentKeys.Add($effectiveKey)) { continue }
+            $results += [PSCustomObject]@{
+                RoleAssignmentId      = $assignment.id
+                SourceAssignmentId    = $assignment.id
+                AssignmentSource      = 'RoleAssignedGroupMember'
+                SourceGroupId         = $groupId
+                SourceGroupName       = $assignment.principal.displayName
+                MembershipPath        = "$groupId -> $memberId"
+                PrincipalId          = $memberId
+                PrincipalDisplayName = $member.displayName
+                PrincipalType        = '#microsoft.graph.user'
+                PrincipalUPN         = $member.userPrincipalName
+                PrincipalAppId       = $null
+                RoleDefinitionId     = $assignment.roleDefinitionId
+                RoleTemplateId       = $definition.TemplateId
+                RoleName             = $definition.DisplayName
+                RoleTier             = $definition.Tier
+                IsSensitiveTarget    = $definition.IsSensitiveTarget
+                MicrosoftClassifiedPrivileged = $definition.MicrosoftClassifiedPrivileged
+                CanControlApplications = $definition.CanControlApplications
+                CanControlServicePrincipals = $definition.CanControlServicePrincipals
+                AllowedResourceActions = $definition.AllowedResourceActions
+                DefinitionSource     = $definition.DefinitionSource
+                DirectoryScopeId     = $assignment.directoryScopeId
+                AppScopeId           = $assignment.appScopeId
+            }
         }
     }
     $script:CachedRoleAssignments = $results
@@ -1674,7 +1747,9 @@ function Invoke-RoleAudit {
                 Roles       = [System.Collections.Generic.List[string]]::new()
             }
         }
-        $userRoles[$ra.PrincipalId].Roles.Add($ra.RoleName)
+        if (-not $userRoles[$ra.PrincipalId].Roles.Contains([string]$ra.RoleName)) {
+            $userRoles[$ra.PrincipalId].Roles.Add($ra.RoleName)
+        }
     }
 
     $privilegedUserIds = $userRoles.Keys
@@ -1734,17 +1809,37 @@ function Invoke-RoleAudit {
     if ($groupRoles.Count -gt 0) {
         Write-Host ''
         Write-Host "GROUPS ASSIGNED SENSITIVE ROLES ($($groupRoles.Count) assignments):" -ForegroundColor DarkYellow
-        Write-Host '  Transitive members are not expanded in v0.6.0; data coverage is marked partial.' -ForegroundColor DarkYellow
         $groupRoleExport = @($groupRoles | ForEach-Object {
             [PSCustomObject]@{
                 GroupName        = $_.PrincipalDisplayName
                 GroupId          = $_.PrincipalId
                 Role             = $_.RoleName
                 DirectoryScopeId = $_.DirectoryScopeId
+                AppScopeId       = $_.AppScopeId
+                RoleAssignmentId = $_.RoleAssignmentId
             }
         })
         $groupRoleExport | Format-Table -AutoSize | Out-String | Write-Host
         Export-AuditCsv -Name 'RoleAssignedGroups' -Data $groupRoleExport
+    }
+    $groupMemberRoles = @($sensitiveRoleAssignments | Where-Object { $_.AssignmentSource -eq 'RoleAssignedGroupMember' })
+    if ($groupMemberRoles.Count -gt 0) {
+        $groupMemberExport = @($groupMemberRoles | ForEach-Object {
+            [PSCustomObject]@{
+                GroupId          = $_.SourceGroupId
+                GroupName        = $_.SourceGroupName
+                UserId           = $_.PrincipalId
+                DisplayName      = $_.PrincipalDisplayName
+                UPN              = $_.PrincipalUPN
+                Role             = $_.RoleName
+                RoleDefinitionId = $_.RoleDefinitionId
+                DirectoryScopeId = $_.DirectoryScopeId
+                AppScopeId       = $_.AppScopeId
+                RoleAssignmentId = $_.SourceAssignmentId
+                MembershipPath   = $_.MembershipPath
+            }
+        })
+        Export-AuditCsv -Name 'RoleGroupMembers' -Data $groupMemberExport
     }
 
     # Export
@@ -1886,6 +1981,8 @@ function Invoke-AttackPathAnalysis {
                     PermissionType  = $app.PermissionType
                     Exploitability  = $assessment.Exploitability
                     EvidenceDetail  = $assessment.EvidenceDetail
+                    RoleAssignmentSource = ''
+                    RoleMembershipPath = ''
                     Action          = "Add app credential → authenticate as app → $attackAction"
                     Result          = $impactReason
                     SPDirectCreds   = $spCredCount
@@ -1943,6 +2040,11 @@ function Invoke-AttackPathAnalysis {
                 $spCreds = $spDirectCreds[$sp.PrincipalId]
                 $spCredCount = if ($spCreds) { @($spCreds | Where-Object { $_.IsCurrentlyValid -eq $true }).Count } else { 0 }
                 $controlRoleNames = @($applicableControl | ForEach-Object { $_.RoleName } | Select-Object -Unique)
+                $controlSources = @($applicableControl | ForEach-Object { $_.AssignmentSource } | Where-Object { $_ } | Select-Object -Unique)
+                $controlMembershipPaths = @($applicableControl | ForEach-Object { $_.MembershipPath } | Where-Object { $_ } | Select-Object -Unique)
+                $controlRoleLabels = @($applicableControl | ForEach-Object {
+                    if ($_.AssignmentSource -eq 'RoleAssignedGroupMember') { "$($_.RoleName) (via $($_.SourceGroupName))" } else { $_.RoleName }
+                } | Select-Object -Unique)
                 $targetRoleNames = @($newTargetRoles | ForEach-Object { $_.RoleName } | Select-Object -Unique)
                 $targetImpactSeverity = Get-RoleImpactSeverity -RoleAssignments $newTargetRoles
                 $pathDef = $script:AttackPathDefs | Where-Object { $_.id -eq 'ROLE_BASED_SP_CONTROL' } | Select-Object -First 1
@@ -1952,10 +2054,12 @@ function Invoke-AttackPathAnalysis {
                     PathId          = 'ROLE_BASED_SP_CONTROL'
                     Severity        = if ($isMitigated) { 'INFO' } else { $targetImpactSeverity }
                     Exploitability  = $assessment.Exploitability
-                    EvidenceDetail  = $assessment.EvidenceDetail
+                    EvidenceDetail  = @($assessment.EvidenceDetail, @($controlMembershipPaths | ForEach-Object { "Role membership path: $_" })) | Where-Object { $_ } | Join-String -Separator '; '
+                    RoleAssignmentSource = $controlSources -join ', '
+                    RoleMembershipPath = $controlMembershipPaths -join '; '
                     UserDisplayName = $applicableControl[0].PrincipalDisplayName
                     UserUPN         = $applicableControl[0].PrincipalUPN
-                    UserRole        = $controlRoleNames -join ', '
+                    UserRole        = $controlRoleLabels -join ', '
                     AppName         = $sp.PrincipalDisplayName
                     AppId           = $targetAppId
                     Permission      = $targetRoleNames -join ', '
