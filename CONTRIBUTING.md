@@ -18,11 +18,20 @@ Generic inventory, presentation, MCP, or integration work should have a concrete
 Use PowerShell 7 and Pester 5.7.1 or later:
 
 ```powershell
+# Run these commands from the repository root.
 Install-Module Pester -MinimumVersion 5.7.1 -Scope CurrentUser
 Invoke-Pester -Path ./tests -CI -Output Detailed
 ```
 
-The test suite uses mocks and must not require a live tenant. CI runs on Windows, Linux, and macOS.
+A successful full run reports `Tests Failed: 0`. Pester discovers all `tests/*.Tests.ps1` files. Run a focused file during development, then run the full suite before submitting:
+
+```powershell
+Invoke-Pester -Path ./tests/RoleGroupExpansion.Tests.ps1 -CI -Output Detailed
+```
+
+The test suite uses synthetic fixtures, mocked Graph requests, and Pester's isolated `TestDrive` paths. It must not authenticate, require a live tenant, or read local audit exports. An unexpected Graph request should fail the test rather than reach the network. CI runs the full suite on Windows, Linux, and macOS.
+
+The focused files are organized by behavioral boundary rather than product mode. For example, `PaginationAccuracy.Tests.ps1` covers partial collection semantics, while `CorePathAccuracy.Tests.ps1` and `P1FollowUp.Tests.ps1` cover cross-mode path decisions. Add a case to the narrowest existing suite when practical; create a new suite only for a distinct contract.
 
 ## Correctness requirements
 
@@ -57,6 +66,8 @@ Prefer a small fixture that proves the semantic boundary. Include negative cases
 - Missing role, owner, lock, activity, or catalogue evidence
 
 Do not run live-tenant collection in automated tests or commit captured tenant output.
+
+When fixing a defect, demonstrate it with a failing synthetic regression first. Prefer asserting the public conclusion and coverage state through the real helper or mode, not only repeating an internal Boolean calculation. Include the important clean or negative boundary so the fix cannot simply classify every candidate as risky.
 
 ## Pull requests
 

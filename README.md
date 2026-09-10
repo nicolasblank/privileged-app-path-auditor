@@ -193,13 +193,22 @@ These gaps drive the next roadmap work and are reported in coverage rather than 
 
 ## Development
 
-The regression suite uses Pester 5.7.1 or later:
+From the repository root, install Pester 5.7.1 or later and run the complete regression suite:
 
 ```powershell
+Install-Module Pester -MinimumVersion 5.7.1 -Scope CurrentUser
 Invoke-Pester -Path ./tests -CI -Output Detailed
 ```
 
-CI runs the same suite on Windows, Linux, and macOS. Tenant access is not required for the tests; Graph behavior is mocked.
+A successful run ends with `Tests Failed: 0`. To run one focused suite while developing:
+
+```powershell
+Invoke-Pester -Path ./tests/AttackPathRendering.Tests.ps1 -CI -Output Detailed
+```
+
+Pester discovers every `*.Tests.ps1` file under `tests/`. The tests use synthetic objects, mocked Graph requests, and isolated temporary paths. They do not sign in to Microsoft Graph, query a tenant, or read the ignored `audit-results/` directories. CI runs the same complete suite on Windows, Linux, and macOS.
+
+See [Contributing](CONTRIBUTING.md#development-setup) for fixture and correctness guidance.
 
 ## License
 

@@ -10,6 +10,24 @@ $PSVersionTable.PSVersion
 
 Windows PowerShell 5.1 is not supported.
 
+## Pester is missing or the tests do not start
+
+Run tests from the repository root with PowerShell 7 and Pester 5.7.1 or later:
+
+```powershell
+Install-Module Pester -MinimumVersion 5.7.1 -Scope CurrentUser
+Invoke-Pester -Path ./tests -CI -Output Detailed
+```
+
+Check the selected version if discovery fails:
+
+```powershell
+$PSVersionTable.PSVersion
+Get-Module -ListAvailable Pester | Sort-Object Version -Descending | Select-Object -First 1
+```
+
+To isolate a failure, pass one `*.Tests.ps1` file to `-Path`. The automated suite is synthetic and must not prompt for Graph sign-in or read tenant audit exports. Stop and report the unexpected request if a test attempts network authentication.
+
 ## A Microsoft Graph module is missing
 
 Install the required SDK modules in the current user's scope:
