@@ -20,6 +20,14 @@ Include only the minimum information needed to reproduce the problem:
 
 Do not send access tokens, client secrets, certificates, tenant secrets, raw exports, full user lists, or unredacted production identifiers.
 
+## Repository data handling
+
+Audit exports are confidential even when they contain no credentials. They can identify users, applications, role assignments, permissions, and attack relationships.
+
+Do not rely on `.gitignore` alone: it does not protect force-added or already tracked files, renamed exports, or sensitive files present only in older commits. This repository includes a strict Git-object scanner, versioned pre-commit/pre-push hooks, and full-history CI checks. See [Contributing](CONTRIBUTING.md#repository-data-safety-checks) for setup and commands.
+
+If tenant evidence enters Git history, deleting it in a later commit is insufficient. Stop pushes, remove the data from every affected ref, coordinate clone cleanup, and contact the hosting provider to remove cached objects and pull-request references.
+
 ## Public issues
 
 Use public issues for non-sensitive bugs and feature proposals. Redact tenant IDs, object IDs, user principal names, application names, and Graph responses unless they are synthetic.

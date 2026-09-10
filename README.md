@@ -216,6 +216,14 @@ Invoke-Pester -Path ./tests/AttackPathRendering.Tests.ps1 -CI -Output Detailed
 
 Pester discovers every `*.Tests.ps1` file under `tests/`. The tests use synthetic objects, mocked Graph requests, and isolated temporary paths. They do not sign in to Microsoft Graph, query a tenant, or read the ignored `audit-results/` directories. CI runs the same complete suite on Windows, Linux, and macOS.
 
+Enable the repository's local data-safety hooks once per clone:
+
+```powershell
+git config --local core.hooksPath .githooks
+```
+
+VS Code commits and pushes use these Git hooks. They block audit outputs, CSV files, generated caches, and renamed audit-export content. CI independently scans both the current tree and all fetched history, so `.gitignore` is not the only protection.
+
 See [Contributing](CONTRIBUTING.md#development-setup) for fixture and correctness guidance.
 
 ## License

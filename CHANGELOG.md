@@ -8,6 +8,7 @@ v0.6 changes how findings are calculated, not how the auditor is run. Results ca
 
 ### Changed
 
+- Add strict repository data-safety enforcement over Git objects: staged content, complete pushed-tip history, non-commit ref targets, the tracked tree, and full reachable history. Versioned hooks protect VS Code Git operations once enabled, and CI provides the authoritative full-history gate.
 - Replace the unbounded role-control target table with a one-row-per-user triage summary and prioritized compact path chains. Console detail respects `output.truncateAfter`; returned and exported findings remain complete.
 - Count users and target SPs by stable object identity, add deterministic chain ordering, identify ambiguous candidates as `Multiple credential routes`, and normalize tenant-controlled labels to single-line console text.
 - Read current Entra role definitions at runtime, including Microsoft `isPrivileged` classification and permitted actions for built-in and custom roles.
@@ -29,18 +30,18 @@ v0.6 changes how findings are calculated, not how the auditor is run. Results ca
 - Expand active role-assigned groups to effective transitive user assignments with inherited role/scope evidence and source-group provenance. Retain raw group assignments, successful groups, and users observed before later-page failures; keep incomplete groups partial.
 - Prevent false negative role classification when expanded assignment principal metadata is missing or unsupported. Preserve distinct source role-assignment IDs while suppressing repeated copies of the same assignment record.
 - Keep role-group provenance columns stable in mixed `AttackPaths.csv` exports.
-- P2 review follow-up: share conditional permission-coverage requirements across standalone PermissionAudit, standalone CredentialHygiene, and Full. Application-only and intentionally empty configurations no longer report missing delegated coverage; genuine required-source failures still warn.
+- Share conditional permission-coverage requirements across standalone PermissionAudit, standalone CredentialHygiene, and Full. Application-only and intentionally empty configurations no longer report missing delegated coverage; genuine required-source failures still warn.
 - Clarify the attack-path catalogue's existing runtime limits: three IDs provide specific overrides, and unused metadata does not configure detectors, output labels, or references. No new catalogue functionality is enabled.
 - Correct checked-in audit descriptions to distinguish currently valid direct-SP credentials from inactive inventory, and single-user consent beneficiaries from approval actors.
-- P2 resource boundaries: require Microsoft Graph resource identity for all built-in permission-equivalence mappings, including the Global Administrator shortcut. Preserve the reviewed P1 scope and uncertainty behavior.
-- P2 reporting: qualify Full summaries by each mode's required/applicable evidence; preserve per-mode target isolation and monotonic run-wide failures. Unknown sources and review-only findings no longer appear as clean green zeros.
-- P2 consent: handle additive mixed policies without calling them low-risk-only, retain per-grant client/resource/beneficiary identity without inferring an approver, and collect grants even when policy retrieval fails.
-- P2 exports: retain delegated principal identity in mixed PermissionAudit CSVs through a consistent row schema.
-- P2 credential dates: require complete timezone-qualified start/end timestamps with `start <= now < end`, preserve future versus expired distinctions, keep unknown intervals partial, and format typed-offset expiry dates in UTC. Preserve timeless FIC treatment without asserting authentication capability.
-- P2 stale counts: count distinct application IDs in console and Full summaries/actions while retaining permission-level CSV evidence rows.
-- P2 catalogue: validate fresh and expired cache shapes and GUIDs; reject invalid caches as a whole, preserve valid expired fallback and existing download encoding recovery.
-- P2 missing-response hardening: reject malformed collection pages, unresolved permission resources, absent policy settings, and missing client names as incomplete evidence. Retain earlier valid pages where the caller opts in.
-- Independent-review P1 follow-up: evaluate incomplete role/scope evidence and unmet prerequisites before full lock mitigation. Keep observed block evidence on potential rows without downgrading target impact to `INFO`.
+- Require Microsoft Graph resource identity for all built-in permission-equivalence mappings, including the Global Administrator shortcut. Preserve the reviewed scope and uncertainty behavior.
+- Qualify Full summaries by each mode's required/applicable evidence; preserve per-mode target isolation and monotonic run-wide failures. Unknown sources and review-only findings no longer appear as clean green zeros.
+- Handle additive mixed consent policies without calling them low-risk-only, retain per-grant client/resource/beneficiary identity without inferring an approver, and collect grants even when policy retrieval fails.
+- Retain delegated principal identity in mixed PermissionAudit CSVs through a consistent row schema.
+- Require complete timezone-qualified credential start/end timestamps with `start <= now < end`, preserve future versus expired distinctions, keep unknown intervals partial, and format typed-offset expiry dates in UTC. Preserve timeless FIC treatment without asserting authentication capability.
+- Count distinct application IDs in stale-privilege console and Full summaries/actions while retaining permission-level CSV evidence rows.
+- Validate fresh and expired catalogue cache shapes and GUIDs; reject invalid caches as a whole, preserve valid expired fallback, and retain existing download encoding recovery.
+- Reject malformed collection pages, unresolved permission resources, absent policy settings, and missing client names as incomplete evidence. Retain earlier valid pages where the caller opts in.
+- Evaluate incomplete role/scope evidence and unmet prerequisites before full lock mitigation. Keep observed block evidence on potential rows without downgrading target impact to `INFO`.
 - Retain unsupported directory/app-specific credential-control scopes as uncertain routes while preserving exclusions for known object/type mismatches and administrative-unit credential scopes.
 - Add Microsoft Graph-specific `AppRoleAssignment.ReadWrite.All` equivalence for the modeled permission-grant capability of confirmed tenant-wide PRA/Global Administrator assignments, using role template IDs rather than display names. Unknown scopes remain potential; same-named custom-resource permissions do not match this new rule.
 - Correct application credential-capability matching: authentication-settings-only actions no longer imply credential writes; `applications.myOrganization` authority requires a single-tenant audience.
@@ -57,12 +58,13 @@ v0.6 changes how findings are calculated, not how the auditor is run. Results ca
 
 ### Testing
 
+- Add disposable-repository regression tests for force-added output paths, arbitrary CSVs, hostile filenames, renamed export schemas, staged-index isolation, add-then-delete history, pushed tips, non-commit tag targets, hook execution, and CI wiring.
 - Add rendering regressions for state/severity ordering, stable identity counts, multiple-route presentation, group provenance, console-only truncation, single-line safety, and unchanged returned/exported path counts.
 - Add test-first role-group expansion fixtures for empty, nested, paginated, failed, malformed, duplicate, direct-plus-group, permission-equivalence, role-control, RoleAudit, coverage, and mixed-CSV behavior.
 - Add standalone grant-type/coverage regressions and sentinel configuration-contract tests, including owner severity fallback, target-role severity precedence, unowned console-only recommendations, descriptive-only IDs, and the checked-in description wording.
-- Add test-first P2 suites for resource/cache/export boundaries, consent, credential dates/counts, Full summaries, missing responses, and mode isolation. Use synthetic Graph responses, TestDrive-only caches/exports, and injected clocks; no tenant access is required.
-- Replace the regression that incorrectly expected full mitigation with incomplete role evidence. Add `P1FollowUp.Tests.ps1` with end-to-end Graph-collector fixtures for the three independent-review findings, including partial role pages, role groups, unsupported scopes, retained lock evidence, and resource-specific equivalence boundaries.
-- Add test-first P1 suites in `CorePathAccuracy.Tests.ps1`, `CredentialEvidenceAccuracy.Tests.ps1`, and `PaginationAccuracy.Tests.ps1`, covering positive, negative, incomplete-evidence, alternative-route, and real-collector pagination fixtures.
+- Add test-first suites for resource/cache/export boundaries, consent, credential dates/counts, Full summaries, missing responses, and mode isolation. Use synthetic Graph responses, TestDrive-only caches/exports, and injected clocks; no tenant access is required.
+- Replace the regression that incorrectly expected full mitigation with incomplete role evidence. Add end-to-end Graph-collector fixtures for partial role pages, role groups, unsupported scopes, retained lock evidence, and resource-specific equivalence boundaries.
+- Add test-first core path, credential evidence, and pagination suites covering positive, negative, incomplete-evidence, alternative-route, and real-collector pagination fixtures.
 - Add regression fixtures for privilege delta, role capabilities, permission semantics, application locks, partial evidence, Graph paging, caching, and fallback behavior.
 - Run Pester on Windows, Linux, and macOS in CI.
 - Enforce the read-only Graph contract, version consistency, configuration schemas, and local documentation links.
@@ -77,7 +79,7 @@ v0.6 changes how findings are calculated, not how the auditor is run. Results ca
 - `RoleAssignedGroups.csv`: retain raw group assignments with scope and role-assignment ID. Add `RoleGroupMembers.csv` for effective transitive users and source-group provenance. Add `RoleAssignmentSource` and `RoleMembershipPath` to role-control attack paths, with blank columns retained on owner paths for a stable CSV schema.
 - Active SP counters and `StalePrivilege.ValidCredCount` now require a current complete interval; hygiene total inventory still includes future/expired records. Stale expiry dates are formatted in UTC.
 - Retain existing modes, parameters, filenames, path IDs, configuration keys, and version `0.6.0` while this release is unreleased. Existing CSV consumers must handle the new state/column and nonnumeric unknown hygiene counts.
-- These accuracy passes do not resolve live lock-enforcement questions, PIM-eligible assignments, hidden-membership access, intermediate nested-group reconstruction, re-enablement paths, arbitrary custom-resource/custom-role equivalence, sign-in `Never` semantics, or SAML credential purpose. No JSON contract was added.
+- This release does not resolve live lock-enforcement questions, PIM-eligible assignments, hidden-membership access, intermediate nested-group reconstruction, re-enablement paths, arbitrary custom-resource/custom-role equivalence, sign-in `Never` semantics, or SAML credential purpose. No JSON contract was added.
 
 ## [0.5.1] - 2026-07-19
 

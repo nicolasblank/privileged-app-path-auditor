@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+if ! command -v pwsh >/dev/null 2>&1; then
+  echo "Repository data-safety check requires PowerShell 7 (pwsh). Push blocked." >&2
+  exit 2
+fi
+
+repo="$(git rev-parse --show-toplevel)"
+exec pwsh -NoLogo -NoProfile -File "$repo/tools/Test-RepositoryDataSafety.ps1" -Repository "$repo" -Mode PrePush -RemoteName "$1" -RemoteUrl "$2"

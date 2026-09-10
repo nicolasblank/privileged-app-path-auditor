@@ -33,6 +33,28 @@ Invoke-Pester -Path ./tests/RoleGroupExpansion.Tests.ps1 -CI -Output Detailed
 
 The test suite uses synthetic fixtures, mocked Graph requests, and Pester's isolated `TestDrive` paths. It must not authenticate, require a live tenant, or read local audit exports. An unexpected Graph request should fail the test rather than reach the network. CI runs the full suite on Windows, Linux, and macOS.
 
+## Repository data-safety checks
+
+Enable the versioned hooks once in every clone:
+
+```powershell
+git config --local core.hooksPath .githooks
+git config --local --get core.hooksPath
+```
+
+VS Code invokes normal Git commits and pushes, so it honors `core.hooksPath`. Cloning a repository does not install hooks automatically; CI is the authoritative backstop when local setup is missing.
+
+Run the same strict checks directly:
+
+```powershell
+./tools/Test-RepositoryDataSafety.ps1 -Mode TrackedTree
+./tools/Test-RepositoryDataSafety.ps1 -Mode History
+```
+
+Exit `0` means clean, `1` means a policy violation, and `2` means the scanner could not complete safely. The policy has no allowlist or bypass: tracked CSV files, audit-output/cache paths, and files whose first CSV record matches an audit-export schema are rejected.
+
+`.gitignore` is convenience, not enforcement. It can be bypassed with force-add, does not protect already tracked files, and cannot remove a file from earlier commits. The pre-commit hook scans staged Git blobs; pre-push scans the complete history and reachable blobs of every pushed tip, including files added and deleted before the push; CI scans HEAD and full fetched history.
+
 The focused files are organized by behavioral boundary rather than product mode. Choose the narrowest matching suite, then run the full suite before submitting:
 
 | Concern | Test suite(s) |
@@ -93,4 +115,4 @@ Keep a pull request focused. Explain:
 - Tests performed
 - Any public output or compatibility impact
 
-Before submitting, run the full Pester suite, check documentation links, inspect `git diff`, and ensure no audit output, cache, tokens, or tenant-specific data is staged.
+Before submitting, run the full Pester suite and both repository safety modes, check documentation links, inspect `git diff`, and ensure no audit output, cache, tokens, or tenant-specific data is staged.

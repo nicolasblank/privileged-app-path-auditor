@@ -61,6 +61,10 @@ Describe 'Script and repository contracts' {
         $workflow | Should -Match 'ubuntu-latest'
         $workflow | Should -Match 'windows-latest'
         $workflow | Should -Match 'macos-latest'
+        $workflow | Should -Match 'fetch-depth:\s*0'
+        $workflow | Should -Match 'Run repository data safety checks'
+        $workflow | Should -Match 'Mode TrackedTree'
+        $workflow | Should -Match 'Mode History'
     }
 
     It 'keeps every direct Microsoft Graph request read-only' {

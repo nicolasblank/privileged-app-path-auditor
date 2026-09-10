@@ -45,6 +45,11 @@ The next release closes known evidence gaps and makes every finding suitable for
 - Record proof, reason, remediation, exploitability, and coverage on each finding
 - Expand fixtures for custom roles, unusual scopes, locks, third-party apps, and incomplete Graph responses
 - Improve retry, throttling, caching, and large-tenant performance without weakening evidence semantics
+- Make console meaning understandable without relying on color or symbols
+- Support the `NO_COLOR` convention and evaluate an explicit `-NoColor` parameter
+- Provide linear, screen-reader-friendly path output and improve plain-language findings
+- Document the supported accessibility baseline without claiming formal conformance
+- Add automated accessibility regressions and seek feedback from assistive-technology users
 
 PIM and group coverage are valuable here because they complete the lightweight audit's evidence, not because they are unique categories of security tooling.
 

@@ -24,6 +24,7 @@ No MCP server or external connector is required to build, test, or review the pr
 - Apply role scope and app instance locks only to the route they actually affect.
 - Live tenant runs require explicit user direction. Confirm the displayed tenant and account and treat all output as confidential.
 - Do not copy raw tenant output into GitHub, prompts, MCP tools, or other external systems. Use synthetic fixtures or redact it first.
+- Repository data-safety scans are mandatory. Never weaken, bypass, or allowlist audit-output path, CSV, export-header, staged-blob, pre-push-range, or full-history checks.
 
 ## Public contract
 
@@ -51,5 +52,6 @@ When changing a public contract, update tests, README or the relevant document, 
 - Inspect the diff for unintended public-output changes.
 - Check local Markdown links and version consistency.
 - Ensure no audit exports, catalogue cache, credentials, tokens, or tenant-specific evidence are staged.
+- Run `tools/Test-RepositoryDataSafety.ps1` in `TrackedTree` and `History` modes before release.
 
 Keep this file short. Add a rule only for a critical invariant or a failure that has recurred; put tutorials and general guidance in `CONTRIBUTING.md` or `docs/`.

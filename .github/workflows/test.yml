@@ -18,6 +18,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run repository data safety checks
+        shell: pwsh
+        run: |
+          ./tools/Test-RepositoryDataSafety.ps1 -Mode TrackedTree
+          ./tools/Test-RepositoryDataSafety.ps1 -Mode History
 
       - name: Install Pester
         shell: pwsh
