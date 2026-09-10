@@ -2,7 +2,7 @@
 
 This project stays deliberately narrow: it determines who can turn control of an Entra application or service principal into **additional privilege**, shows the path, and states whether the collected evidence is sufficient to trust that conclusion.
 
-The roadmap is a statement of priorities, not delivery dates. Microsoft Entra changes, real tenant evidence, and user reports can change the order.
+The roadmap is a statement of priorities, not delivery dates. Microsoft Entra changes, available project time, real-world findings, and user feedback may change the order. Feedback is critical, so please keep it coming.
 
 ## Product boundaries
 
