@@ -10,11 +10,14 @@ The tool evaluates application ownership, service-principal control, high-impact
 
 `AttackPath` is the core analysis. The other modes provide the permission, role, credential, consent, and activity context needed to investigate and reduce those paths.
 
+Contributing or running tests? Start with [Development](#development) and the [contributor setup](CONTRIBUTING.md#development-setup).
+
 ## Run your first audit
 
-You need PowerShell 7 and the Microsoft Graph PowerShell SDK:
+You need PowerShell 7 and the Microsoft Graph PowerShell SDK. Open PowerShell 7 (`pwsh`), verify the version, and run the following commands inside that session:
 
 ```powershell
+$PSVersionTable.PSVersion
 Install-Module Microsoft.Graph.Applications -Scope CurrentUser
 Install-Module Microsoft.Graph.Identity.DirectoryManagement -Scope CurrentUser
 Install-Module Microsoft.Graph.Identity.SignIns -Scope CurrentUser
@@ -36,6 +39,8 @@ Or run every audit mode:
 
 The script opens an interactive Microsoft Graph sign-in when needed. Before continuing, verify that the displayed account and tenant are the ones you intend to audit.
 
+The first run requests the read-only delegated scopes listed under [Access and safety](#access-and-safety). Tenant consent policy may require an administrator to approve them. That approval grants read access only; the auditor does not modify the tenant.
+
 To save CSV evidence, explicitly provide an export directory:
 
 ```powershell
@@ -43,6 +48,8 @@ To save CSV evidence, explicitly provide an export directory:
 ```
 
 Without `-ExportPath`, findings are printed to the console and no reports are created. The only operational file the tool may write by default is `config/MicrosoftApps.json`, a 24-hour local cache used to classify Microsoft first-party applications.
+
+A completed run prints findings followed by a data-coverage summary. Treat a zero finding count as meaningful only when the required evidence is complete. For module loading, sign-in, consent, or Graph query failures, see [Troubleshooting](docs/TROUBLESHOOTING.md).
 
 ## What makes a path meaningful
 

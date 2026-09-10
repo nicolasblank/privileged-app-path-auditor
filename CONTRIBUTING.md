@@ -15,7 +15,9 @@ Generic inventory, presentation, MCP, or integration work should have a concrete
 
 ## Development setup
 
-Use PowerShell 7 and Pester 5.7.1 or later:
+Clone the repository as shown in the [README](README.md#run-your-first-audit), enter its root, and open PowerShell 7 (`pwsh`). Production behavior is primarily implemented in `Invoke-PrivilegedAudit.ps1`; regression suites are under `tests/`.
+
+Use Pester 5.7.1 or later:
 
 ```powershell
 # Run these commands from the repository root.
@@ -31,7 +33,20 @@ Invoke-Pester -Path ./tests/RoleGroupExpansion.Tests.ps1 -CI -Output Detailed
 
 The test suite uses synthetic fixtures, mocked Graph requests, and Pester's isolated `TestDrive` paths. It must not authenticate, require a live tenant, or read local audit exports. An unexpected Graph request should fail the test rather than reach the network. CI runs the full suite on Windows, Linux, and macOS.
 
-The focused files are organized by behavioral boundary rather than product mode. For example, `PaginationAccuracy.Tests.ps1` covers partial collection semantics, while `CorePathAccuracy.Tests.ps1` and `P1FollowUp.Tests.ps1` cover cross-mode path decisions. Add a case to the narrowest existing suite when practical; create a new suite only for a distinct contract.
+The focused files are organized by behavioral boundary rather than product mode. Choose the narrowest matching suite, then run the full suite before submitting:
+
+| Concern | Test suite(s) |
+|---|---|
+| Repository, configuration, Graph safety, and broad mode contracts | `Invoke-PrivilegedAudit.Tests.ps1`, `PathConfigurationContract.Tests.ps1` |
+| Core privilege-path decisions and reviewed edge cases | `CorePathAccuracy.Tests.ps1`, `P1FollowUp.Tests.ps1`, `P2Boundaries.Tests.ps1` |
+| Console path presentation | `AttackPathRendering.Tests.ps1` |
+| Role-assigned group evidence | `RoleGroupExpansion.Tests.ps1` |
+| Pagination and malformed/missing Graph evidence | `PaginationAccuracy.Tests.ps1`, `P2MissingEvidence.Tests.ps1` |
+| Credential evidence and validity | `CredentialEvidenceAccuracy.Tests.ps1`, `P2CredentialValidity.Tests.ps1` |
+| Consent policy and delegated-grant evidence | `P2Consent.Tests.ps1` |
+| Standalone and Full-mode coverage summaries | `StandaloneCoverage.Tests.ps1`, `P2Summary.Tests.ps1`, `P2ModeIsolation.Tests.ps1` |
+
+`P1` and `P2` are historical accuracy-review labels, not severity or priority levels. Add a case to the narrowest existing suite when practical; create a new suite only for a distinct public or evidence contract. The project does not currently define stable Pester tags for narrower filtering, so a focused file is the supported quick-iteration unit.
 
 ## Correctness requirements
 
