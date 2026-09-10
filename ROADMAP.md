@@ -27,6 +27,7 @@ v0.6 changes the finding engine while preserving the familiar command-line workf
 - Separate application permissions from delegated grants and bind grants to their resource API
 - Separate local application registrations from third-party service principals
 - Apply role-assignment scope and app instance lock evidence to the relevant path
+- Expand active role-assigned groups to effective transitive user members and retain assigned-group provenance
 - Classify paths as direct, potential, or mitigated and report complete, partial, or unavailable data coverage
 - Avoid treating failed queries, missing activity, or unresolved local objects as clean evidence
 - Remove the unexplained aggregate risk score while preserving factual counts and remediation actions
@@ -36,7 +37,7 @@ v0.6 changes the finding engine while preserving the familiar command-line workf
 
 The next release closes known evidence gaps and makes every finding suitable for repeatable machine use.
 
-- Expand active role-assigned groups to effective transitive user members and retain assigned-group provenance (completed in v0.6); consider intermediate nesting evidence only if Graph evidence permits it
+- Consider intermediate group-nesting evidence if Microsoft Graph exposes a reliable membership chain
 - Include active and eligible/PIM assignments where Microsoft Graph evidence permits
 - Preserve assignment and administrative scope in each relevant finding
 - Introduce stable finding identifiers
