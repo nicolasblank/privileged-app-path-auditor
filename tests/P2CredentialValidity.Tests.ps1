@@ -1,6 +1,11 @@
 BeforeAll {
     . (Join-Path $PSScriptRoot '..' 'Invoke-PrivilegedAudit.ps1')
 
+    function Invoke-MgGraphRequest {
+        param($Method, $Uri)
+        throw "Unmocked Graph request: $Method $Uri"
+    }
+
     function New-ValidityCredential {
         param($Start = '2026-09-01T00:00:00Z', $End = '2026-10-01T00:00:00Z')
         @{ keyId = 'synthetic-key'; displayName = 'Synthetic credential'; startDateTime = $Start; endDateTime = $End }

@@ -1,6 +1,11 @@
 BeforeAll {
     . (Join-Path $PSScriptRoot '..' 'Invoke-PrivilegedAudit.ps1')
 
+    function Invoke-MgGraphRequest {
+        param($Method, $Uri)
+        throw "Unmocked Graph request: $Method $Uri"
+    }
+
     function Set-SummaryModeSources {
         param([string]$Mode)
         foreach ($source in $script:summarySources[$Mode]) {

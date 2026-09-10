@@ -1,6 +1,11 @@
 BeforeAll {
     . (Join-Path $PSScriptRoot '..' 'Invoke-PrivilegedAudit.ps1')
 
+    function Invoke-MgGraphRequest {
+        param($Method, $Uri)
+        throw "Unmocked Graph request: $Method $Uri"
+    }
+
     function New-RoleGroupDefinition {
         param(
             [string]$Id = 'rd-pra',

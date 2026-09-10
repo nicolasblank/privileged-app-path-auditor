@@ -11,6 +11,11 @@ BeforeAll {
 
     . $script:scriptPath
 
+    function Invoke-MgGraphRequest {
+        param($Method, $Uri)
+        throw "Unmocked Graph request: $Method $Uri"
+    }
+
     function Reset-TestState {
         $script:CachedDangerousApps = $null
         $script:CachedRoleAssignments = $null

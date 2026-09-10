@@ -2,6 +2,12 @@
 
 Notable changes to Privileged App Path Auditor are recorded here. The project follows semantic versioning while the public finding contract is still being stabilized.
 
+## [0.6.1] - Unreleased
+
+### Fixed
+
+- Make mocked regression suites independent of an installed Microsoft Graph SDK so synthetic tests run consistently on Windows, Linux, and macOS.
+
 ## [0.6.0] - 2026-09-10
 
 v0.6 changes how findings are calculated, not how the auditor is run. Results can differ materially from v0.5 because the engine now tests whether a control relationship produces additional privilege and records the evidence needed to support that conclusion.

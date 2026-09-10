@@ -1,6 +1,11 @@
 BeforeAll {
     . (Join-Path $PSScriptRoot '..' 'Invoke-PrivilegedAudit.ps1')
 
+    function Invoke-MgGraphRequest {
+        param($Method, $Uri)
+        throw "Unmocked Graph request: $Method $Uri"
+    }
+
     $script:contractPathIds = @(
         'APP_OWNER_ESCALATION', 'SHADOW_ADMIN_SP', 'CONSENT_GRANT_ATTACK',
         'STALE_APP_EXPLOITATION', 'CREDENTIAL_THEFT_SECRET',
