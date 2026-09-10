@@ -47,7 +47,8 @@ To save CSV evidence, explicitly provide an export directory:
 ./Invoke-PrivilegedAudit.ps1 -Mode Full -ExportPath ./audit-results
 ```
 
-Without `-ExportPath`, findings are printed to the console and no reports are created. The only operational file the tool may write by default is `config/MicrosoftApps.json`, a 24-hour local cache used to classify Microsoft first-party applications.
+> [!IMPORTANT]
+> **No reports are created unless you provide `-ExportPath`.** Without it, findings are printed only to the console. The sole operational file the tool may write by default is `config/MicrosoftApps.json`, a 24-hour local cache used to classify Microsoft first-party applications.
 
 A completed run prints findings followed by a data-coverage summary. Treat a zero finding count as meaningful only when the required evidence is complete. For module loading, sign-in, consent, or Graph query failures, see [Troubleshooting](docs/TROUBLESHOOTING.md).
 
